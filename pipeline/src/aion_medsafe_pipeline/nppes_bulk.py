@@ -178,21 +178,12 @@ def _normalize_row(row: list[str], snapshot_hash: str, observed_at: str) -> dict
     }
 
 
-def process_bulk(
-    csv_path: pathlib.Path,
-    out_path: pathlib.Path,
-    snapshot_hash: str,
-    limit: int | None = None,
-) -> dict[str, int]:
-    """Stream the npidata CSV into the normalized full-table NDJSON. Returns counts."""
+def _process_reader(reader, out_path: pathlib.Path, snapshot_hash: str, limit: int | None) -> dict[str, int]:
+    """Normalize CSV rows from any reader into the full-table NDJSON."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     stats = {"rows": 0, "written": 0, "active": 0, "deactivated": 0, "skipped": 0}
     observed_at = datetime.now(UTC).isoformat()
-
-    with open(csv_path, encoding="utf-8", errors="replace", newline="") as src, open(
-        out_path, "w", encoding="utf-8"
-    ) as out:
-        reader = csv.reader(src)
+    with open(out_path, "w", encoding="utf-8") as out:
         next(reader, None)  # header
         for row in reader:
             stats["rows"] += 1
@@ -206,3 +197,38 @@ def process_bulk(
             if limit is not None and stats["written"] >= limit:
                 break
     return stats
+
+
+def process_bulk(
+    csv_path: pathlib.Path,
+    out_path: pathlib.Path,
+    snapshot_hash: str,
+    limit: int | None = None,
+) -> dict[str, int]:
+    """Normalize an extracted npidata CSV into the full-table NDJSON."""
+    with open(csv_path, encoding="utf-8", errors="replace", newline="") as src:
+        return _process_reader(csv.reader(src), out_path, snapshot_hash, limit)
+
+
+def _main_csv_name(zf: zipfile.ZipFile) -> str:
+    for name in zf.namelist():
+        base = name.split("/")[-1]
+        if base.startswith("npidata_pfile_") and base.endswith(".csv") and "fileheader" not in base.lower():
+            return name
+    raise RuntimeError("no npidata_pfile CSV in archive")
+
+
+def process_bulk_zip(
+    zip_path: pathlib.Path,
+    out_path: pathlib.Path,
+    snapshot_hash: str,
+    limit: int | None = None,
+) -> dict[str, int]:
+    """Normalize the npidata CSV by STREAMING it out of the ZIP — never extracts
+    the ~9 GB uncompressed file to disk."""
+    import io
+
+    with zipfile.ZipFile(zip_path) as zf:
+        with zf.open(_main_csv_name(zf)) as raw:
+            text = io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="")
+            return _process_reader(csv.reader(text), out_path, snapshot_hash, limit)

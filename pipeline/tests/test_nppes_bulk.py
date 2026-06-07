@@ -56,6 +56,29 @@ def test_process_bulk_normalizes_fields_and_status(tmp_path: pathlib.Path) -> No
     assert rows["1999999999"]["name"] == "ACME HOME HEALTH LLC"
 
 
+def test_process_bulk_zip_streams_from_archive(tmp_path: pathlib.Path) -> None:
+    import io
+    import zipfile
+
+    from aion_medsafe_pipeline.nppes_bulk import process_bulk_zip
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([f"col{i}" for i in range(51)])  # header
+    w.writerow(_row("1234567890", "1", last="DOE", first="JANE"))
+
+    zpath = tmp_path / "NPPES_Data_Dissemination_Test.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("npidata_pfile_20260101-20260131.csv", buf.getvalue())
+        # A fileheader member must be ignored by the main-CSV selector.
+        zf.writestr("npidata_pfile_20260101-20260131_fileheader.csv", "ignore\n")
+
+    out = tmp_path / "out.ndjson"
+    stats = process_bulk_zip(zpath, out, "snap")
+    assert stats["written"] == 1
+    assert json.loads(out.read_text().splitlines()[0])["npi"] == "1234567890"
+
+
 def test_process_bulk_respects_limit(tmp_path: pathlib.Path) -> None:
     csv_path = tmp_path / "npidata.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:

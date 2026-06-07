@@ -169,11 +169,7 @@ def nppes_bulk_command(
 
     Seal the raw ZIP afterwards with `aion-medsafe ingest` for provenance.
     """
-    from aion_medsafe_pipeline.nppes_bulk import (
-        download_bulk,
-        extract_main_csv,
-        process_bulk,
-    )
+    from aion_medsafe_pipeline.nppes_bulk import download_bulk, process_bulk_zip
 
     console.print("[bold]Downloading NPPES bulk dissemination file...[/bold]")
     hashes = download_bulk(data_dir, monthly_url=monthly_url)
@@ -184,10 +180,10 @@ def nppes_bulk_command(
     console.print(f"  Monthly ZIP: {monthly_path.name}")
     console.print(f"  SHA-256: {snapshot_hash}")
 
-    console.print("[bold]Extracting + normalizing...[/bold]")
-    csv_path = extract_main_csv(monthly_path, data_dir / "raw" / "nppes_bulk")
+    # Stream the CSV out of the ZIP (never extracts the ~9 GB uncompressed file).
+    console.print("[bold]Normalizing (streaming from ZIP)...[/bold]")
     out_path = data_dir / "normalized" / "nppes_providers.ndjson"
-    stats = process_bulk(csv_path, out_path, snapshot_hash, limit=limit)
+    stats = process_bulk_zip(monthly_path, out_path, snapshot_hash, limit=limit)
     for key, value in stats.items():
         console.print(f"  {key}: {value:,}")
     console.print(f"  Saved: {out_path}")

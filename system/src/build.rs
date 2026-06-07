@@ -138,9 +138,11 @@ pub fn run(
             normalized_dir.display()
         );
     }
-    let nppes = load_nppes(&normalized_dir.join("nppes_providers.ndjson"))?;
-
     let npis: Vec<Option<String>> = records.iter().map(NormalizedExclusion::npi_norm).collect();
+    // Only the excluded providers' NPIs are needed for enrichment — filter the
+    // national NPPES table (millions of rows) down to those on load.
+    let wanted: BTreeSet<&str> = npis.iter().filter_map(|n| n.as_deref()).collect();
+    let nppes = load_nppes(&normalized_dir.join("nppes_providers.ndjson"), &wanted)?;
     let inputs: Vec<ResolveInput> = records
         .iter()
         .enumerate()
@@ -228,9 +230,11 @@ fn load_records(dir: &Path) -> anyhow::Result<Vec<NormalizedExclusion>> {
     Ok(records)
 }
 
-/// Map NPI -> is-active, from the normalized NPPES bulk table (npi + status).
+/// Map NPI -> is-active, from the normalized NPPES bulk table (npi + status),
+/// keeping only NPIs in `wanted` (the excluded providers). The national table is
+/// millions of rows; we stream it but retain only the relevant subset.
 /// Produced by `aion-medsafe-pipeline nppes-bulk`.
-fn load_nppes(path: &Path) -> anyhow::Result<BTreeMap<String, bool>> {
+fn load_nppes(path: &Path, wanted: &BTreeSet<&str>) -> anyhow::Result<BTreeMap<String, bool>> {
     #[derive(Deserialize)]
     struct NppesRow {
         #[serde(default)]
@@ -250,7 +254,7 @@ fn load_nppes(path: &Path) -> anyhow::Result<BTreeMap<String, bool>> {
             continue;
         }
         let row: NppesRow = serde_json::from_str(&line)?;
-        if !row.npi.is_empty() {
+        if !row.npi.is_empty() && wanted.contains(row.npi.as_str()) {
             active.insert(row.npi, row.status == "ACTIVE");
         }
     }
