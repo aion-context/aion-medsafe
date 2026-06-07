@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 
-use crate::detection::{self, ComputedSignal, DetectionReport};
+use crate::detection::{self, ComputedSignal, DetectionReport, ReviewCandidate};
 use crate::graph::TrustGraph;
 use crate::policy::DetectionPolicy;
 use crate::provenance;
@@ -45,8 +45,11 @@ pub fn run(
     // Step 4-6: compute, jurisdiction filter, threshold + review gate
     let report = detection::compute(&graph, &policy, jurisdiction);
 
+    // Entity-resolution review queue (sub-merge identity links for a human).
+    let review = detection::review_queue(&graph, jurisdiction);
+
     // Step 7: seal the signal output as its own .aion
-    let payload = serialize_report(&policy, &report, jurisdiction);
+    let payload = serialize_report(&policy, &report, &review, jurisdiction);
     let output_path = resolve_output(output, jurisdiction);
     let signing_key = provenance::load_signing_key()?;
     let sealed = provenance::seal_payload(
@@ -60,7 +63,14 @@ pub fn run(
         ),
     )?;
 
-    print_summary(&policy, &report, jurisdiction, &output_path, &sealed);
+    print_summary(
+        &policy,
+        &report,
+        &review,
+        jurisdiction,
+        &output_path,
+        &sealed,
+    );
     Ok(())
 }
 
@@ -69,6 +79,7 @@ pub fn run(
 fn serialize_report(
     policy: &DetectionPolicy,
     report: &DetectionReport,
+    review: &[ReviewCandidate],
     jurisdiction: Option<&str>,
 ) -> String {
     let queued = report
@@ -88,6 +99,7 @@ fn serialize_report(
         "queued_for_review": queued,
         "below_threshold": report.signals.len() - queued,
         "not_computable": report.not_computable,
+        "identity_review_candidates": review.len(),
     });
 
     let mut out = String::new();
@@ -96,6 +108,13 @@ fn serialize_report(
     for signal in &report.signals {
         // ComputedSignal is Serialize; serialization cannot fail for this shape.
         if let Ok(line) = serde_json::to_string(signal) {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    // Identity-link review queue (reason_code = "identity_review_candidate").
+    for candidate in review {
+        if let Ok(line) = serde_json::to_string(candidate) {
             out.push_str(&line);
             out.push('\n');
         }
@@ -119,6 +138,7 @@ fn resolve_output(output: Option<&Path>, jurisdiction: Option<&str>) -> PathBuf 
 fn print_summary(
     policy: &DetectionPolicy,
     report: &DetectionReport,
+    review: &[ReviewCandidate],
     jurisdiction: Option<&str>,
     output_path: &Path,
     sealed: &[u8; 32],
@@ -156,9 +176,31 @@ fn print_summary(
         );
     }
     print_top_signals(report);
+
+    println!();
+    println!(
+        "  Identity review queue (entity-resolution): {}",
+        review.len()
+    );
+    print_top_candidates(review);
+
     println!();
     println!("  Sealed signal output: {}", output_path.display());
     println!("  Output manifest hash: {}", hex::encode(sealed));
+}
+
+/// Print up to five highest-confidence identity-link candidates for review.
+fn print_top_candidates(review: &[ReviewCandidate]) {
+    if review.is_empty() {
+        return;
+    }
+    println!("  Top identity links to confirm/reject:");
+    for candidate in review.iter().take(5) {
+        println!(
+            "    [{:.2}] {} ⇄ {}",
+            candidate.confidence, candidate.name_a, candidate.name_b
+        );
+    }
 }
 
 /// Print up to five highest-confidence queued signals as a reviewer preview.

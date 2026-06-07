@@ -5,47 +5,65 @@ argument-hint: "[jurisdiction]"
 
 # Risk Signal Computation
 
+Computes policy-gated risk signals AND an entity-resolution review queue over a
+sealed Trust Graph. Every input is a verified `.aion`; the output is sealed.
+
 ## Prerequisites
 - Registry initialized (`system/.aion/medsafe.registry.json`)
-- Detection policy sealed as `.aion` file
-- Data sources ingested with provenance
+- Detection policy sealed as `.aion` (`policy/detection_policy.aion`)
+- Sealed Trust Graph (`provenance/trust_graph.aion`)
 
 ## Steps
 
-### 1. Verify Detection Policy
+### 1. Build + seal the Trust Graph (if stale)
+Resolves entities (NPI/name hard merges + fuzzy linking) over the normalized
+NDJSON and seals the graph. Skip if `provenance/trust_graph.aion` is current.
 ```bash
-cd system && ./target/release/aion-medsafe provenance \
-  --manifest policy/detection_rules.aion
+cd system && ./target/release/aion-medsafe build-graph \
+  --normalized ../pipeline/data/normalized \
+  --output provenance/trust_graph.aion
 ```
-Must show `Valid: true`. If not — STOP. Do not compute signals on tampered policy.
 
-### 2. Verify Data Source Provenance
+### 2. Seal the detection policy (if not already sealed)
 ```bash
-cd system
-for f in provenance/*.aion; do
-  ./target/release/aion-medsafe provenance --manifest "$f" 2>&1 | grep "Valid:"
-done
+cd system && ./target/release/aion-medsafe seal-policy \
+  --rules policy/detection_policy.yaml \
+  --output policy/detection_policy.aion
 ```
-All must pass. Any failure — exclude that source from computation.
 
-### 3. Compute Signals
+### 3. Compute signals + review queue
+`signals` re-verifies BOTH the policy and the graph `.aion` (all four
+guarantees) before computing — it REFUSES on any failure.
 ```bash
 cd system && ./target/release/aion-medsafe signals \
-  --policy policy/detection_rules.aion \
-  --graph pipeline/data/normalized/trust_graph.ndjson \
+  --policy policy/detection_policy.aion \
+  --graph provenance/trust_graph.aion \
   --jurisdiction $ARGUMENTS
 ```
 
-### 4. Threshold Classification
-| Confidence | Action |
+## Output (sealed to `provenance/signals_{jurisdiction}_{ts}.aion`)
+
+NDJSON audit records, each distinguished by `reason_code`:
+
+| reason_code | Meaning |
 |---|---|
-| < 0.75 | Log only, no human review |
-| 0.75–0.90 | Queue for analyst review |
-| > 0.90 | Priority queue + immediate notification |
-| 1.0 (deterministic) | Auto-escalate to legal |
+| `signal_queued_review` | Risk signal at/above threshold → human review |
+| `signal_below_threshold` | Risk signal logged, not escalated |
+| `identity_review_candidate` | Two entities that may be the same provider — confirm/reject (NOT auto-merged) |
+
+The run-meta line carries counts: `signal_count`, `queued_for_review`,
+`identity_review_candidates`, and `not_computable`.
 
 ## Signal Types (from policy)
-- `federal_state_mismatch` — On LEIE but not state list
-- `active_npi_while_excluded` — Excluded but NPI active
-- `billing_after_exclusion` — Claims after exclusion date
 - `re_exclusion` — Reinstated then excluded again
+- `multi_state_exclusion` — Exclusions in multiple states
+- `federal_state_mismatch` — On federal LEIE but absent from the state list
+- `active_npi_while_excluded` — Excluded but NPI active in NPPES
+- `billing_after_exclusion` — Needs claims data (reported not-computable until ingested)
+
+## The identity review queue
+Entity resolution surfaces sub-auto-merge links (e.g. `WOLF ROBERT A ⇄ WOLF
+ROBERT`) for a human to confirm or reject. Confirming a link can change which
+signals fire, so triage these alongside risk signals. The queue is
+jurisdiction-filtered (a candidate appears if either entity has a nexus to the
+jurisdiction) and ordered by confidence.

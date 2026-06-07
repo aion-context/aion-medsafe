@@ -120,17 +120,28 @@ pub struct ExclusionEvent {
     pub observed_at: String,
 }
 
+/// A suggested same-provider link below the auto-merge threshold — surfaced for
+/// human review by entity resolution, never merged autonomously.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LinkCandidate {
+    pub entity_a: String,
+    pub entity_b: String,
+    pub confidence: f64,
+    #[serde(default)]
+    pub signals: Vec<String>,
+}
+
 /// One line of the typed-NDJSON graph stream, dispatched on the `kind` tag.
 ///
-/// `Other` makes the loader forward-compatible: kinds the engine does not
-/// consume (e.g. `identity_link_candidate`, a human-review suggestion) are
-/// parsed and skipped rather than failing the whole graph.
+/// `Other` makes the loader forward-compatible: any future kind is parsed and
+/// skipped rather than failing the whole graph.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum GraphLine {
     Meta(GraphMeta),
     Entity(Entity),
     ExclusionEvent(ExclusionEvent),
+    IdentityLinkCandidate(LinkCandidate),
     #[serde(other)]
     Other,
 }
@@ -141,6 +152,8 @@ enum GraphLine {
 pub struct TrustGraph {
     pub meta: Option<GraphMeta>,
     pub entities: Vec<Entity>,
+    /// Sub-merge identity links surfaced for human review.
+    pub link_candidates: Vec<LinkCandidate>,
     events_by_entity: HashMap<String, Vec<ExclusionEvent>>,
 }
 
@@ -194,7 +207,8 @@ impl TrustGraph {
                         .or_default()
                         .push(ev);
                 }
-                // Forward-compatible: unconsumed kinds (e.g. review candidates).
+                GraphLine::IdentityLinkCandidate(c) => graph.link_candidates.push(c),
+                // Forward-compatible: any other future kind is skipped.
                 GraphLine::Other => {}
             }
         }
@@ -236,6 +250,25 @@ mod tests {
         assert_eq!(g.events_for("E1").len(), 2);
         assert_eq!(g.events_for("missing").len(), 0);
         assert!(g.meta.is_some());
+    }
+
+    #[test]
+    fn parses_identity_link_candidates() {
+        let line = r#"{"kind":"identity_link_candidate","entity_a":"E1","entity_b":"E2","confidence":0.83,"signals":["name_phonetic"]}"#;
+        let g = TrustGraph::parse_ndjson(format!("{SAMPLE}{line}\n").as_bytes(), "test")
+            .expect("parse");
+        assert_eq!(g.link_candidates.len(), 1);
+        assert_eq!(g.link_candidates[0].entity_a, "E1");
+        assert_eq!(g.link_candidates[0].confidence, 0.83);
+    }
+
+    #[test]
+    fn unknown_kind_is_ignored_not_errored() {
+        let line = r#"{"kind":"some_future_kind","foo":1}"#;
+        let g = TrustGraph::parse_ndjson(format!("{SAMPLE}{line}\n").as_bytes(), "test")
+            .expect("parse");
+        assert_eq!(g.entities.len(), 1);
+        assert_eq!(g.link_candidates.len(), 0);
     }
 
     #[test]

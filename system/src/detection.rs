@@ -10,6 +10,7 @@
 //! reported as not-computable rather than fabricated.
 
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -20,6 +21,7 @@ use crate::policy::DetectionPolicy;
 /// Bounded reason-code vocabulary (subset of `.claude/rules/agents.md`).
 const REASON_QUEUED_REVIEW: &str = "signal_queued_review";
 const REASON_BELOW_THRESHOLD: &str = "signal_below_threshold";
+const REASON_IDENTITY_REVIEW: &str = "identity_review_candidate";
 
 /// Signal types this engine can compute from exclusion + identity data alone.
 const COMPUTABLE: &[&str] = &[
@@ -52,6 +54,72 @@ pub struct DetectionReport {
     pub signals: Vec<ComputedSignal>,
     pub not_computable: Vec<String>,
     pub entities_evaluated: usize,
+}
+
+/// An entity-resolution review item: two entities entity resolution thinks may
+/// be the same provider but did not auto-merge. Surfaced for a human to confirm
+/// or reject — never merged autonomously (agents.md: no auto-link below
+/// threshold). Confirming a link can change which signals fire, so reviewers
+/// triage these alongside risk signals.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReviewCandidate {
+    pub entity_a: String,
+    pub entity_b: String,
+    pub name_a: String,
+    pub name_b: String,
+    pub confidence: f64,
+    pub signals: Vec<String>,
+    pub reason_code: String,
+}
+
+/// Build the identity-link review queue for a jurisdiction, highest confidence
+/// first. A candidate is included when either endpoint is an entity with a
+/// nexus to `jurisdiction` (or always, when no jurisdiction is given).
+pub fn review_queue(graph: &TrustGraph, jurisdiction: Option<&str>) -> Vec<ReviewCandidate> {
+    let by_id: HashMap<&str, &Entity> = graph
+        .entities
+        .iter()
+        .map(|e| (e.entity_id.as_str(), e))
+        .collect();
+    let jur = jurisdiction.map(str::to_uppercase);
+
+    let in_jur = |entity: Option<&&Entity>| -> bool {
+        match (&jur, entity) {
+            (None, _) => true,
+            (Some(j), Some(e)) => {
+                e.canonical_state.as_deref().map(str::to_uppercase) == Some(j.clone())
+            }
+            (Some(_), None) => false,
+        }
+    };
+
+    let mut queue: Vec<ReviewCandidate> = graph
+        .link_candidates
+        .iter()
+        .filter_map(|c| {
+            let a = by_id.get(c.entity_a.as_str());
+            let b = by_id.get(c.entity_b.as_str());
+            if !in_jur(a) && !in_jur(b) {
+                return None;
+            }
+            Some(ReviewCandidate {
+                entity_a: c.entity_a.clone(),
+                entity_b: c.entity_b.clone(),
+                name_a: a.map(|e| e.canonical_name.clone()).unwrap_or_default(),
+                name_b: b.map(|e| e.canonical_name.clone()).unwrap_or_default(),
+                confidence: c.confidence,
+                signals: c.signals.clone(),
+                reason_code: REASON_IDENTITY_REVIEW.to_string(),
+            })
+        })
+        .collect();
+    queue.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
+    tracing::info!(
+        event = "identity_review_queue_built",
+        jurisdiction = jurisdiction.unwrap_or("national"),
+        candidates = queue.len(),
+    );
+    queue
 }
 
 /// Raw detector output before policy/threshold dressing.
@@ -353,8 +421,45 @@ risk_signals:
         )
     }
 
+    fn cand(a: &str, b: &str, conf: f64) -> String {
+        format!(
+            r#"{{"kind":"identity_link_candidate","entity_a":"{a}","entity_b":"{b}","confidence":{conf},"signals":["name_edit_distance"]}}"#
+        )
+    }
+
     fn find<'a>(r: &'a DetectionReport, kind: &str) -> Option<&'a ComputedSignal> {
         r.signals.iter().find(|s| s.signal_type == kind)
+    }
+
+    #[test]
+    fn review_queue_filters_by_jurisdiction_and_sorts() {
+        let g = graph(&[
+            &entity("E1", "HI"),
+            &entity("E2", "HI"),
+            &entity("E3", "CA"),
+            &entity("E4", "CA"),
+            &cand("E1", "E2", 0.80), // both HI
+            &cand("E3", "E4", 0.95), // both CA — excluded under HI
+            &cand("E1", "E3", 0.85), // mixed — included (E1 in HI)
+        ]);
+        let q = review_queue(&g, Some("HI"));
+        assert_eq!(q.len(), 2);
+        // highest confidence first
+        assert_eq!(q[0].confidence, 0.85);
+        assert!(q[0].confidence >= q[1].confidence);
+        assert!(q.iter().all(|c| c.reason_code == REASON_IDENTITY_REVIEW));
+        // names resolved from entities
+        assert_eq!(q[1].name_a, "E1");
+    }
+
+    #[test]
+    fn review_queue_national_includes_all() {
+        let g = graph(&[
+            &entity("E1", "HI"),
+            &entity("E3", "CA"),
+            &cand("E1", "E3", 0.8),
+        ]);
+        assert_eq!(review_queue(&g, None).len(), 1);
     }
 
     // ── re_exclusion ────────────────────────────────────────────────────────
