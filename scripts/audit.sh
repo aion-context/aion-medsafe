@@ -39,7 +39,7 @@ fi
 # 2. Provenance chain integrity ------------------------------------------------
 echo "[2] Provenance"
 verified=0
-for f in system/provenance/*.aion system/policy/*.aion system/decisions/*.aion; do
+for f in system/provenance/*.aion system/policy/*.aion system/decisions/*.aion system/release/*.aion; do
 	[ -f "$f" ] || continue
 	if ( cd system && ./target/release/aion-medsafe provenance --manifest "${f#system/}" 2>/dev/null ) | grep -q "Valid: true"; then
 		verified=$((verified + 1))

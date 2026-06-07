@@ -28,6 +28,9 @@ system/decisions/
 # authoritative record, and lives in the gitignored provenance/ dir).
 system/packets/
 
+# Sealed release attestations (regenerable per build via `aion-medsafe release`).
+system/release/
+
 # Registry contains only public keys — safe to commit
 # system/.aion/medsafe.registry.json  ← intentionally NOT ignored
 

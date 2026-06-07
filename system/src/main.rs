@@ -17,6 +17,7 @@ mod ingest;
 mod packet;
 mod policy;
 mod provenance;
+mod release;
 mod resolve;
 mod signals;
 
@@ -230,6 +231,17 @@ enum Commands {
         manifest: std::path::PathBuf,
     },
 
+    /// Build a sealed SLSA-style provenance attestation for the release binary
+    Release {
+        /// Path to the built release binary
+        #[arg(short, long, default_value = "target/release/aion-medsafe")]
+        binary: std::path::PathBuf,
+
+        /// Path to write the sealed attestation (.aion)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
+
     /// Initialize the key registry and signing keys
     Init {
         /// Path to store the registry
@@ -347,6 +359,8 @@ fn main() -> anyhow::Result<()> {
             &render_dir,
             limit,
         ),
+
+        Commands::Release { binary, output } => release::run(&binary, output.as_deref()),
 
         Commands::Provenance { manifest } => provenance::show(&manifest),
 
