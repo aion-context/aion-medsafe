@@ -20,6 +20,10 @@ system/provenance/
 # `aion-medsafe seal-policy` / `seal-graph`. The YAML/NDJSON source is committed.
 system/policy/*.aion
 
+# Human review decision log — authoritative operational state (NOT regenerable;
+# the sealed hash chain is the audit trail). Back up separately, like a database.
+system/decisions/
+
 # Registry contains only public keys — safe to commit
 # system/.aion/medsafe.registry.json  ← intentionally NOT ignored
 

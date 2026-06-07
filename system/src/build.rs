@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
@@ -15,6 +16,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::decisions;
 use crate::graph::{Entity, EntityType, ExclusionAuthority, ExclusionEvent, ExclusionStatus};
 use crate::provenance;
 use crate::resolve::{self, ResolveInput};
@@ -118,10 +120,17 @@ pub struct BuildStats {
     pub name_merges: usize,
     pub fuzzy_auto_links: usize,
     pub blocks_capped: usize,
+    pub confirmed_applied: usize,
+    pub rejected: usize,
 }
 
-/// Read normalized NDJSON, resolve, build the typed graph, and seal it.
-pub fn run(normalized_dir: &Path, output: &Path) -> anyhow::Result<BuildStats> {
+/// Read normalized NDJSON, resolve, apply human review decisions, build the
+/// typed graph, and seal it.
+pub fn run(
+    normalized_dir: &Path,
+    output: &Path,
+    decisions_path: &Path,
+) -> anyhow::Result<BuildStats> {
     let records = load_records(normalized_dir)?;
     if records.is_empty() {
         anyhow::bail!(
@@ -144,15 +153,18 @@ pub fn run(normalized_dir: &Path, output: &Path) -> anyhow::Result<BuildStats> {
 
     let resolved = resolve::resolve(&inputs);
 
-    let mut clusters: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (i, &rep) in resolved.cluster_of.iter().enumerate() {
-        clusters.entry(rep).or_default().push(i);
-    }
+    // Apply human review decisions (verified): confirm → force-merge clusters;
+    // reject → suppress from the emitted candidate queue.
+    let registry = provenance::load_registry(Path::new(provenance::DEFAULT_REGISTRY_PATH))?;
+    let verdicts = decisions::verdicts(&decisions::load(decisions_path, &registry)?);
 
-    let entity_id_by_rep: BTreeMap<usize, String> = clusters
-        .iter()
-        .map(|(&rep, members)| (rep, entity_id_for(members, &records, &npis)))
-        .collect();
+    let mut cluster_of = resolved.cluster_of.clone();
+    let clusters0 = group_clusters(&cluster_of);
+    let ids0 = entity_ids(&clusters0, &records, &npis);
+    let confirmed_applied = apply_confirmed(&mut cluster_of, &ids0, &verdicts.confirmed);
+
+    let clusters = group_clusters(&cluster_of);
+    let entity_id_by_rep = entity_ids(&clusters, &records, &npis);
 
     let payload = render(
         &records,
@@ -161,6 +173,8 @@ pub fn run(normalized_dir: &Path, output: &Path) -> anyhow::Result<BuildStats> {
         &clusters,
         &entity_id_by_rep,
         &resolved,
+        &cluster_of,
+        &verdicts.rejected,
     );
 
     let signing_key = provenance::load_signing_key()?;
@@ -175,11 +189,15 @@ pub fn run(normalized_dir: &Path, output: &Path) -> anyhow::Result<BuildStats> {
         records: records.len(),
         entities: clusters.len(),
         events: payload.matches("\"kind\":\"exclusion_event\"").count(),
-        candidates: resolved.candidates.len(),
+        candidates: payload
+            .matches("\"kind\":\"identity_link_candidate\"")
+            .count(),
         npi_merges: resolved.stats.npi_merges,
         name_merges: resolved.stats.name_merges,
         fuzzy_auto_links: resolved.stats.fuzzy_auto_links,
         blocks_capped: resolved.stats.blocks_capped,
+        confirmed_applied,
+        rejected: verdicts.rejected.len(),
     })
 }
 
@@ -233,6 +251,7 @@ fn load_nppes(path: &Path) -> anyhow::Result<BTreeMap<String, bool>> {
     Ok(active)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render(
     records: &[NormalizedExclusion],
     npis: &[Option<String>],
@@ -240,6 +259,8 @@ fn render(
     clusters: &BTreeMap<usize, Vec<usize>>,
     entity_id_by_rep: &BTreeMap<usize, String>,
     resolved: &resolve::ResolveResult,
+    cluster_of: &[usize],
+    rejected: &BTreeSet<(String, String)>,
 ) -> String {
     let mut entities = Vec::with_capacity(clusters.len());
     let mut coverage: BTreeSet<String> = BTreeSet::new();
@@ -255,12 +276,12 @@ fn render(
         .iter()
         .enumerate()
         .filter_map(|(i, rec)| {
-            let entity_id = &entity_id_by_rep[&resolved.cluster_of[i]];
+            let entity_id = &entity_id_by_rep[&cluster_of[i]];
             build_event(rec, entity_id)
         })
         .collect();
 
-    let candidates = candidate_lines(resolved, &resolved.cluster_of, entity_id_by_rep);
+    let candidates = candidate_lines(resolved, cluster_of, entity_id_by_rep, rejected);
     let sources: BTreeSet<String> = records.iter().map(|r| r.source_id.clone()).collect();
 
     let mut out = String::new();
@@ -377,6 +398,7 @@ fn candidate_lines(
     resolved: &resolve::ResolveResult,
     cluster_of: &[usize],
     entity_id_by_rep: &BTreeMap<usize, String>,
+    rejected: &BTreeSet<(String, String)>,
 ) -> Vec<LinkCandidateLine> {
     let mut best: BTreeMap<(String, String), LinkCandidateLine> = BTreeMap::new();
     for cand in &resolved.candidates {
@@ -390,6 +412,11 @@ fn candidate_lines(
         } else {
             (b.clone(), a.clone())
         };
+        // A reviewer rejected this link — keep the entities separate and stop
+        // surfacing it in the review queue.
+        if rejected.contains(&key) {
+            continue;
+        }
         let replace = best
             .get(&key)
             .map_or(true, |e| cand.confidence > e.confidence);
@@ -406,6 +433,76 @@ fn candidate_lines(
         }
     }
     best.into_values().collect()
+}
+
+/// Group `cluster_of[record] = rep` into `rep -> member record indices`.
+fn group_clusters(cluster_of: &[usize]) -> BTreeMap<usize, Vec<usize>> {
+    let mut clusters: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (i, &rep) in cluster_of.iter().enumerate() {
+        clusters.entry(rep).or_default().push(i);
+    }
+    clusters
+}
+
+fn entity_ids(
+    clusters: &BTreeMap<usize, Vec<usize>>,
+    records: &[NormalizedExclusion],
+    npis: &[Option<String>],
+) -> BTreeMap<usize, String> {
+    clusters
+        .iter()
+        .map(|(&rep, members)| (rep, entity_id_for(members, records, npis)))
+        .collect()
+}
+
+/// Force-merge clusters for confirmed identity links (a human verdict overrides
+/// the resolver's threshold). Mutates `cluster_of` in place; returns how many
+/// confirmed links were applied.
+fn apply_confirmed(
+    cluster_of: &mut [usize],
+    entity_id_by_rep: &BTreeMap<usize, String>,
+    confirmed: &BTreeSet<(String, String)>,
+) -> usize {
+    if confirmed.is_empty() {
+        return 0;
+    }
+    let rep_by_id: HashMap<&str, usize> = entity_id_by_rep
+        .iter()
+        .map(|(&rep, id)| (id.as_str(), rep))
+        .collect();
+
+    let n = cluster_of.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    let mut applied = 0;
+    for (a, b) in confirmed {
+        if let (Some(&ra), Some(&rb)) = (rep_by_id.get(a.as_str()), rep_by_id.get(b.as_str())) {
+            if uf_union(&mut parent, ra, rb) {
+                applied += 1;
+            }
+        }
+    }
+    for rep in cluster_of.iter_mut() {
+        *rep = uf_find(&mut parent, *rep);
+    }
+    applied
+}
+
+fn uf_find(parent: &mut [usize], mut x: usize) -> usize {
+    while parent[x] != x {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
+    }
+    x
+}
+
+fn uf_union(parent: &mut [usize], a: usize, b: usize) -> bool {
+    let (ra, rb) = (uf_find(parent, a), uf_find(parent, b));
+    if ra == rb {
+        return false;
+    }
+    // Keep the smaller index as representative for determinism.
+    parent[ra.max(rb)] = ra.min(rb);
+    true
 }
 
 fn entity_id_for(

@@ -14,7 +14,9 @@
 use aion_context::crypto::SigningKey;
 use aion_context::key_registry::KeyRegistry;
 use aion_context::manifest::{sign_manifest, ArtifactManifestBuilder};
-use aion_context::operations::{init_file, show_current_rules, verify_file, InitOptions};
+use aion_context::operations::{
+    commit_version, init_file, show_current_rules, verify_file, CommitOptions, InitOptions,
+};
 use aion_context::types::AuthorId;
 use std::path::Path;
 
@@ -80,6 +82,48 @@ pub fn seal_payload(
         blake3 = %digest,
     );
     Ok(*digest.as_bytes())
+}
+
+/// Append a new sealed version to a `.aion` (or initialize it on first write).
+///
+/// For mutable governance logs — e.g. the human review-decision store — where
+/// the aion-context hash chain across versions IS the tamper-evident audit
+/// trail. Each call commits the full current payload as a new version bound to
+/// its parent by `parent_hash`.
+pub fn commit_payload(
+    path: &Path,
+    payload: &[u8],
+    signing_key: &SigningKey,
+    registry: &KeyRegistry,
+    message: &str,
+) -> Result<()> {
+    let author = AuthorId::new(PIPELINE_AUTHOR);
+    if path.exists() {
+        let options = CommitOptions {
+            author_id: author,
+            signing_key,
+            message,
+            timestamp: None,
+        };
+        commit_version(path, payload, &options, registry)?;
+    } else {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let options = InitOptions {
+            author_id: author,
+            signing_key,
+            message,
+            timestamp: None,
+        };
+        init_file(path, payload, &options)?;
+    }
+    tracing::info!(
+        event = "payload_committed",
+        file = %path.display(),
+        size = payload.len(),
+    );
+    Ok(())
 }
 
 /// Verify a sealed `.aion` (all four guarantees) and return its payload bytes.

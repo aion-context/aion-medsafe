@@ -8,6 +8,7 @@
 //! 4. Sealed release export (SLSA-attested)
 
 mod build;
+mod decisions;
 mod detection;
 mod error;
 mod graph;
@@ -107,6 +108,44 @@ enum Commands {
         /// Path to write the sealed Trust Graph (.aion)
         #[arg(short, long, default_value = "provenance/trust_graph.aion")]
         output: std::path::PathBuf,
+
+        /// Sealed human review decisions to apply (confirm → merge, reject → suppress)
+        #[arg(short, long, default_value = decisions::DEFAULT_DECISIONS_PATH)]
+        decisions: std::path::PathBuf,
+    },
+
+    /// Record a human review decision on an identity link (confirm or reject)
+    Decide {
+        /// First entity id
+        #[arg(short, long)]
+        a: String,
+
+        /// Second entity id
+        #[arg(short, long)]
+        b: String,
+
+        /// Verdict: "confirm" (same provider) or "reject" (distinct)
+        #[arg(short, long)]
+        decision: String,
+
+        /// Reviewer identifier (recorded in the decision)
+        #[arg(short, long, default_value = "analyst")]
+        reviewer: String,
+
+        /// Optional free-text reason
+        #[arg(long, default_value = "")]
+        reason: String,
+
+        /// Path to the sealed decision log (.aion)
+        #[arg(long, default_value = decisions::DEFAULT_DECISIONS_PATH)]
+        decisions: std::path::PathBuf,
+    },
+
+    /// List the current human review decisions
+    Decisions {
+        /// Path to the sealed decision log (.aion)
+        #[arg(long, default_value = decisions::DEFAULT_DECISIONS_PATH)]
+        decisions: std::path::PathBuf,
     },
 
     /// Show provenance chain for a data source
@@ -156,8 +195,12 @@ fn main() -> anyhow::Result<()> {
 
         Commands::SealGraph { input, output } => seal_artifact(&input, &output, "trust_graph"),
 
-        Commands::BuildGraph { normalized, output } => {
-            let stats = build::run(&normalized, &output)?;
+        Commands::BuildGraph {
+            normalized,
+            output,
+            decisions,
+        } => {
+            let stats = build::run(&normalized, &output, &decisions)?;
             println!("✓ Built + sealed Trust Graph: {}", output.display());
             println!("  Records resolved: {}", stats.records);
             println!("  Entities: {}", stats.entities);
@@ -165,6 +208,12 @@ fn main() -> anyhow::Result<()> {
                 "    merges — npi: {}, name: {}, fuzzy auto-link: {}",
                 stats.npi_merges, stats.name_merges, stats.fuzzy_auto_links
             );
+            if stats.confirmed_applied > 0 || stats.rejected > 0 {
+                println!(
+                    "    review decisions — confirmed merges: {}, rejected (suppressed): {}",
+                    stats.confirmed_applied, stats.rejected
+                );
+            }
             println!("  Exclusion events: {}", stats.events);
             println!("  Review link candidates: {}", stats.candidates);
             if stats.blocks_capped > 0 {
@@ -172,6 +221,17 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+
+        Commands::Decide {
+            a,
+            b,
+            decision,
+            reviewer,
+            reason,
+            decisions,
+        } => decide(&a, &b, &decision, &reviewer, &reason, &decisions),
+
+        Commands::Decisions { decisions } => list_decisions(&decisions),
 
         Commands::Provenance { manifest } => provenance::show(&manifest),
 
@@ -181,6 +241,69 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// Record a human review decision (confirm/reject) on an identity link.
+fn decide(
+    a: &str,
+    b: &str,
+    decision: &str,
+    reviewer: &str,
+    reason: &str,
+    decisions_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    if decision != decisions::CONFIRM && decision != decisions::REJECT {
+        anyhow::bail!(
+            "decision must be \"{}\" or \"{}\", got {decision:?}",
+            decisions::CONFIRM,
+            decisions::REJECT
+        );
+    }
+    let registry =
+        provenance::load_registry(std::path::Path::new(provenance::DEFAULT_REGISTRY_PATH))?;
+    let signing_key = provenance::load_signing_key()?;
+    let record = decisions::Decision {
+        entity_a: a.to_string(),
+        entity_b: b.to_string(),
+        decision: decision.to_string(),
+        reviewer: reviewer.to_string(),
+        reason: reason.to_string(),
+        decided_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let total = decisions::record(decisions_path, &registry, &signing_key, record)?;
+
+    println!("✓ Recorded {decision}: {a} ⇄ {b} (reviewer: {reviewer})");
+    println!(
+        "  Sealed decision log: {} ({total} decisions)",
+        decisions_path.display()
+    );
+    println!("  Apply with: aion-medsafe build-graph");
+    Ok(())
+}
+
+/// List the current (latest-per-pair) human review decisions.
+fn list_decisions(decisions_path: &std::path::Path) -> anyhow::Result<()> {
+    let registry =
+        provenance::load_registry(std::path::Path::new(provenance::DEFAULT_REGISTRY_PATH))?;
+    let all = decisions::load(decisions_path, &registry)?;
+    if all.is_empty() {
+        println!("No decisions recorded ({})", decisions_path.display());
+        return Ok(());
+    }
+    let verdicts = decisions::verdicts(&all);
+    println!(
+        "Decisions in {} — {} confirmed, {} rejected:",
+        decisions_path.display(),
+        verdicts.confirmed.len(),
+        verdicts.rejected.len()
+    );
+    for d in &all {
+        println!(
+            "  [{}] {} ⇄ {}  by {} ({})",
+            d.decision, d.entity_a, d.entity_b, d.reviewer, d.decided_at
+        );
+    }
+    Ok(())
 }
 
 /// Seal a plaintext governance artifact (policy YAML, graph NDJSON) into a

@@ -67,3 +67,22 @@ ROBERT`) for a human to confirm or reject. Confirming a link can change which
 signals fire, so triage these alongside risk signals. The queue is
 jurisdiction-filtered (a candidate appears if either entity has a nexus to the
 jurisdiction) and ordered by confidence.
+
+### Acting on the queue (closes the loop)
+Record a reviewer's verdict; it is appended to a sealed, hash-chained decision
+log. Re-run `build-graph` to apply: confirmed links force a merge, rejected
+links are kept separate and suppressed from the queue.
+```bash
+cd system
+# confirm two entities are the same provider
+./target/release/aion-medsafe decide --a "<entity_id_a>" --b "<entity_id_b>" \
+  --decision confirm --reviewer <analyst_id> --reason "<why>"
+# or reject
+./target/release/aion-medsafe decide --a "<id_a>" --b "<id_b>" --decision reject
+./target/release/aion-medsafe decisions          # list current verdicts
+./target/release/aion-medsafe build-graph         # apply (confirm→merge, reject→suppress)
+```
+The decision log (`decisions/identity_decisions.aion`) is authoritative
+operational state — not regenerable. Decisions are tamper-evident via the seal;
+the `reviewer` field records who decided (per-analyst signing keys are a future
+hardening).
