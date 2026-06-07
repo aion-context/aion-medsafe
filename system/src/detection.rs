@@ -29,6 +29,7 @@ const COMPUTABLE: &[&str] = &[
     "multi_state_exclusion",
     "federal_state_mismatch",
     "active_npi_while_excluded",
+    "npi_deactivation_after_exclusion",
 ];
 
 /// A computed risk signal. NOT an accusation — an evidence-ranked indicator
@@ -202,6 +203,11 @@ fn run_detectors(
             hits.push(("active_npi_while_excluded", h));
         }
     }
+    if policy.has_signal("npi_deactivation_after_exclusion") {
+        if let Some(h) = detect_npi_deactivation_after_exclusion(entity, events) {
+            hits.push(("npi_deactivation_after_exclusion", h));
+        }
+    }
 
     hits
 }
@@ -343,6 +349,33 @@ fn detect_active_npi(entity: &Entity, events: &[ExclusionEvent]) -> Option<Hit> 
     Some((0.85, description, evidence))
 }
 
+/// NPI deactivated AFTER the provider was excluded — a possible attempt to
+/// "disappear" before resurfacing under a new entity (domain-knowledge.md).
+fn detect_npi_deactivation_after_exclusion(
+    entity: &Entity,
+    events: &[ExclusionEvent],
+) -> Option<Hit> {
+    let deactivated = parse_date(&entity.npi_deactivation_date)?;
+    let first_excluded = events
+        .iter()
+        .filter_map(|e| parse_date(&e.exclusion_date))
+        .min()?;
+    if deactivated <= first_excluded {
+        return None; // deactivated before/at exclusion — not the disappear pattern
+    }
+    let description = format!(
+        "NPI deactivated {} after first exclusion {} — possible attempt to disappear",
+        deactivated.format("%Y-%m-%d"),
+        first_excluded.format("%Y-%m-%d"),
+    );
+    let evidence = events
+        .iter()
+        .filter(|e| e.exclusion_date.is_some())
+        .map(|e| e.event_id.clone())
+        .collect();
+    Some((0.8, description, evidence))
+}
+
 /// True if the latest exclusion is more recent than the latest reinstatement,
 /// or any event is marked indefinite.
 fn currently_excluded(events: &[ExclusionEvent]) -> bool {
@@ -392,6 +425,7 @@ risk_signals:
   multi_state_exclusion: {severity: 0.70, description: "x", requires_human_review: true}
   federal_state_mismatch: {severity: 0.55, description: "x", requires_human_review: true}
   active_npi_while_excluded: {severity: 0.90, description: "x", requires_human_review: true}
+  npi_deactivation_after_exclusion: {severity: 0.80, description: "x", requires_human_review: true}
   billing_after_exclusion: {severity: 1.0, description: "x", requires_human_review: true}
 "#;
 
@@ -563,6 +597,43 @@ risk_signals:
         let r = compute(&g, &policy(), Some("HI"));
         let sig = find(&r, "active_npi_while_excluded").expect("active_npi fires");
         assert!(sig.confidence >= 0.85);
+    }
+
+    fn entity_with_deactivation(id: &str, state: &str, deact: &str) -> String {
+        format!(
+            r#"{{"kind":"entity","entity_id":"{id}","entity_type":"individual","canonical_name":"{id}","canonical_state":"{state}","npis":["1234567890"],"npi_deactivation_date":"{deact}"}}"#
+        )
+    }
+
+    #[test]
+    fn npi_deactivation_after_exclusion_true_positive() {
+        let g = graph(&[
+            &entity_with_deactivation("E1", "HI", "2021-06-01T00:00:00Z"),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        let sig = find(&r, "npi_deactivation_after_exclusion").expect("fires");
+        assert!(sig.confidence >= 0.8);
+    }
+
+    #[test]
+    fn npi_deactivation_before_exclusion_does_not_fire() {
+        let g = graph(&[
+            &entity_with_deactivation("E1", "HI", "2018-01-01T00:00:00Z"),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        assert!(find(&r, "npi_deactivation_after_exclusion").is_none());
+    }
+
+    #[test]
+    fn npi_deactivation_absent_does_not_fire() {
+        let g = graph(&[
+            &entity("E1", "HI"),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        assert!(find(&r, "npi_deactivation_after_exclusion").is_none());
     }
 
     #[test]

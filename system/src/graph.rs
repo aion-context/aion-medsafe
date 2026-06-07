@@ -82,8 +82,12 @@ pub struct Entity {
     /// `None` means no NPPES record was found (absence of data, not "inactive").
     #[serde(default)]
     pub npi_active: Option<bool>,
-    // entity_type and resolution_confidence are carried from entity resolution
-    // for display/audit; not yet read by the detectors.
+    /// RFC3339 deactivation date of a matched NPI (earliest), if any matched NPI
+    /// is deactivated in NPPES. `None` = no deactivation on record.
+    #[serde(default)]
+    pub npi_deactivation_date: Option<String>,
+    // resolution_confidence is carried from entity resolution for display/audit;
+    // not yet read by the detectors.
     #[allow(dead_code)]
     #[serde(default = "default_confidence")]
     pub resolution_confidence: f64,

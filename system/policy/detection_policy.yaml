@@ -47,6 +47,12 @@ risk_signals:
     requires_human_review: true
     escalation: "legal_compliance"
 
+  npi_deactivation_after_exclusion:
+    severity: 0.80
+    description: "NPI deactivated after the exclusion date — possible attempt to disappear before resurfacing under a new entity."
+    requires_human_review: true
+    escalation: "legal_compliance"
+
   # Defined for completeness but NOT computable until claims/MMIS data is
   # ingested (PROTECTED class, future gate). The engine reports this signal
   # type as not-computable rather than fabricating a result.

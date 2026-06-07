@@ -230,22 +230,30 @@ fn load_records(dir: &Path) -> anyhow::Result<Vec<NormalizedExclusion>> {
     Ok(records)
 }
 
-/// Map NPI -> is-active, from the normalized NPPES bulk table (npi + status),
-/// keeping only NPIs in `wanted` (the excluded providers). The national table is
-/// millions of rows; we stream it but retain only the relevant subset.
+/// NPPES status for one NPI: active flag + (raw) deactivation date if any.
+struct NppesInfo {
+    active: bool,
+    deactivation_date: Option<String>,
+}
+
+/// Map NPI -> status info, from the normalized NPPES bulk table, keeping only
+/// NPIs in `wanted` (the excluded providers). The national table is millions of
+/// rows; we stream it but retain only the relevant subset.
 /// Produced by `aion-medsafe-pipeline nppes-bulk`.
-fn load_nppes(path: &Path, wanted: &BTreeSet<&str>) -> anyhow::Result<BTreeMap<String, bool>> {
+fn load_nppes(path: &Path, wanted: &BTreeSet<&str>) -> anyhow::Result<BTreeMap<String, NppesInfo>> {
     #[derive(Deserialize)]
     struct NppesRow {
         #[serde(default)]
         npi: String,
         #[serde(default)]
         status: String,
+        #[serde(default)]
+        deactivation_date: Option<String>,
     }
 
-    let mut active = BTreeMap::new();
+    let mut map = BTreeMap::new();
     if !path.exists() {
-        return Ok(active);
+        return Ok(map);
     }
     let reader = BufReader::new(std::fs::File::open(path)?);
     for line in reader.lines() {
@@ -255,17 +263,23 @@ fn load_nppes(path: &Path, wanted: &BTreeSet<&str>) -> anyhow::Result<BTreeMap<S
         }
         let row: NppesRow = serde_json::from_str(&line)?;
         if !row.npi.is_empty() && wanted.contains(row.npi.as_str()) {
-            active.insert(row.npi, row.status == "ACTIVE");
+            map.insert(
+                row.npi,
+                NppesInfo {
+                    active: row.status == "ACTIVE",
+                    deactivation_date: row.deactivation_date,
+                },
+            );
         }
     }
-    Ok(active)
+    Ok(map)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn render(
     records: &[NormalizedExclusion],
     npis: &[Option<String>],
-    nppes: &BTreeMap<String, bool>,
+    nppes: &BTreeMap<String, NppesInfo>,
     clusters: &BTreeMap<usize, Vec<usize>>,
     entity_id_by_rep: &BTreeMap<usize, String>,
     resolved: &resolve::ResolveResult,
@@ -334,7 +348,7 @@ fn build_entity(
     members: &[usize],
     records: &[NormalizedExclusion],
     npis: &[Option<String>],
-    nppes: &BTreeMap<String, bool>,
+    nppes: &BTreeMap<String, NppesInfo>,
 ) -> Entity {
     let canonical_name = most_common(
         members
@@ -344,10 +358,24 @@ fn build_entity(
     .unwrap_or_default();
     let canonical_state = most_common(members.iter().filter_map(|&i| records[i].state.clone()));
     let member_npis: BTreeSet<String> = members.iter().filter_map(|&i| npis[i].clone()).collect();
-    let npi_active = member_npis
-        .iter()
-        .filter_map(|npi| nppes.get(npi).copied())
-        .reduce(|a, b| a || b);
+
+    let mut npi_active: Option<bool> = None;
+    let mut npi_deactivation_date: Option<String> = None;
+    for npi in &member_npis {
+        if let Some(info) = nppes.get(npi) {
+            npi_active = Some(npi_active.unwrap_or(false) || info.active);
+            // Normalize NPPES MM/DD/YYYY -> RFC3339; keep the earliest.
+            if let Some(rfc) = to_rfc3339(info.deactivation_date.as_deref()) {
+                if npi_deactivation_date
+                    .as_ref()
+                    .map_or(true, |cur| rfc < *cur)
+                {
+                    npi_deactivation_date = Some(rfc);
+                }
+            }
+        }
+    }
+
     let has_npi = !member_npis.is_empty();
     Entity {
         entity_id,
@@ -356,6 +384,7 @@ fn build_entity(
         canonical_state,
         npis: member_npis.into_iter().collect(),
         npi_active,
+        npi_deactivation_date,
         resolution_confidence: if has_npi || members.len() == 1 {
             1.0
         } else {
