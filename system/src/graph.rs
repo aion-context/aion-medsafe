@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use aion_context::key_registry::KeyRegistry;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{MedsafeError, Result};
 use crate::provenance;
@@ -22,7 +22,7 @@ use crate::provenance;
 /// malformed or adversarial payload exhausting memory.
 const MAX_GRAPH_LINES: usize = 5_000_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityType {
     Individual,
@@ -30,7 +30,7 @@ pub enum EntityType {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExclusionAuthority {
     HhsOig,
@@ -39,7 +39,7 @@ pub enum ExclusionAuthority {
     StateLicense,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExclusionStatus {
     Active,
@@ -51,7 +51,7 @@ pub enum ExclusionStatus {
 ///
 /// Retained in full for audit/display; the compute path does not read these
 /// fields today. Mirrors `TrustGraphExport` metadata in schema.py.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct GraphMeta {
     pub export_version: String,
@@ -68,7 +68,7 @@ pub struct GraphMeta {
 }
 
 /// A resolved provider entity node.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entity {
     pub entity_id: String,
     #[allow(dead_code)]
@@ -99,7 +99,7 @@ fn default_confidence() -> f64 {
 /// `source_snapshot_hash`, `observed_at`) and `exclusion_type` are retained for
 /// chain of custody and future detectors even though the current rules read
 /// only dates, authority, state, and status. Mirrors schema.py.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct ExclusionEvent {
     pub event_id: String,
@@ -121,12 +121,18 @@ pub struct ExclusionEvent {
 }
 
 /// One line of the typed-NDJSON graph stream, dispatched on the `kind` tag.
+///
+/// `Other` makes the loader forward-compatible: kinds the engine does not
+/// consume (e.g. `identity_link_candidate`, a human-review suggestion) are
+/// parsed and skipped rather than failing the whole graph.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum GraphLine {
     Meta(GraphMeta),
     Entity(Entity),
     ExclusionEvent(ExclusionEvent),
+    #[serde(other)]
+    Other,
 }
 
 /// The in-memory Trust Graph: entities plus their exclusion events, indexed by
@@ -188,6 +194,8 @@ impl TrustGraph {
                         .or_default()
                         .push(ev);
                 }
+                // Forward-compatible: unconsumed kinds (e.g. review candidates).
+                GraphLine::Other => {}
             }
         }
 

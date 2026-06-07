@@ -6,7 +6,6 @@ from rich.console import Console
 from rich.table import Table
 
 from aion_medsafe_pipeline.fetchers import fetch_source
-from aion_medsafe_pipeline.graph_export import build_graph
 from aion_medsafe_pipeline.parsers import parse_leie_csv
 from aion_medsafe_pipeline.sources import list_sources
 
@@ -220,41 +219,6 @@ def fetch(
     else:
         console.print(f"[red]Unknown source: {source}[/red]")
         raise typer.Exit(code=1)
-
-
-@app.command(name="build-graph")
-def build_graph_command(
-    normalized_dir: pathlib.Path = typer.Option(
-        pathlib.Path("data/normalized"),
-        "--normalized",
-        "-n",
-        help="Directory holding the per-source normalized NDJSON files.",
-    ),
-    output: pathlib.Path = typer.Option(
-        pathlib.Path("data/normalized/trust_graph.ndjson"),
-        "--output",
-        "-o",
-        help="Where to write the typed-NDJSON Trust Graph export.",
-    ),
-) -> None:
-    """Resolve entities + events into the sealed-handoff Trust Graph export.
-
-    The output is plaintext NDJSON; seal it with `aion-medsafe seal-graph`
-    before the Rust signal engine will consume it.
-    """
-    if not normalized_dir.exists():
-        console.print(f"[red]Normalized dir not found: {normalized_dir}[/red]")
-        raise typer.Exit(code=1)
-
-    console.print(f"[bold]Building Trust Graph[/bold] from {normalized_dir}")
-    entities, events = build_graph(normalized_dir, output)
-    console.print(f"  Entities: {entities}")
-    console.print(f"  Exclusion events: {events}")
-    console.print(f"  Saved: {output}")
-    console.print(
-        "\n[dim]Next: aion-medsafe seal-graph --input "
-        f"{output} --output provenance/trust_graph.aion[/dim]"
-    )
 
 
 if __name__ == "__main__":

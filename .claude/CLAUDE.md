@@ -16,15 +16,19 @@ aion-medsafe/
 └── prd0.md           Product requirements document
 ```
 
-### Pipeline (Python)
+### Pipeline (Python) — acquisition + normalization only
 - Ingests government bulk files (LEIE, NPPES, SAM.gov, state exclusion lists)
-- Normalizes to NDJSON
-- Resolves entities across sources
-- Constructs lifecycle events (exclusion → reinstatement → re-exclusion)
+- Normalizes to per-source NDJSON (the handoff to the Rust system)
+- Deliberately thin: NO entity resolution, graph building, or correlation —
+  all compute lives in the Rust system (one fast stack over verified data)
 
-### System (Rust)
+### System (Rust) — provenance + all compute
 - Depends on `aion-context` 1.0 for tamper-evident provenance
 - Seals every ingested file with BLAKE3 hash + Ed25519 signature
+- Entity resolution (`resolve.rs`): NPI/exact-name hard merges + multi-signal
+  fuzzy linking with phonetic blocking; sub-merge matches surfaced for review
+- Trust Graph build (`build.rs`): reads normalized NDJSON → resolves →
+  reconstructs lifecycle events → seals the graph into a `.aion`
 - Policy-gated signal generation (refuses to act if policy is tampered)
 - Tiger Style: zero panics, all paths return `Result<T, E>`
 

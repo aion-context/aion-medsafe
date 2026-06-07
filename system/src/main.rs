@@ -7,12 +7,14 @@
 //! 3. Trust Graph construction and query
 //! 4. Sealed release export (SLSA-attested)
 
+mod build;
 mod detection;
 mod error;
 mod graph;
 mod ingest;
 mod policy;
 mod provenance;
+mod resolve;
 mod signals;
 
 use clap::{Parser, Subcommand};
@@ -96,6 +98,17 @@ enum Commands {
         output: std::path::PathBuf,
     },
 
+    /// Build the Trust Graph from normalized NDJSON (entity resolution) and seal it
+    BuildGraph {
+        /// Directory holding the per-source normalized NDJSON files
+        #[arg(short, long, default_value = "../pipeline/data/normalized")]
+        normalized: std::path::PathBuf,
+
+        /// Path to write the sealed Trust Graph (.aion)
+        #[arg(short, long, default_value = "provenance/trust_graph.aion")]
+        output: std::path::PathBuf,
+    },
+
     /// Show provenance chain for a data source
     Provenance {
         /// Path to the provenance manifest (.aion)
@@ -142,6 +155,23 @@ fn main() -> anyhow::Result<()> {
         Commands::SealPolicy { rules, output } => seal_artifact(&rules, &output, "policy"),
 
         Commands::SealGraph { input, output } => seal_artifact(&input, &output, "trust_graph"),
+
+        Commands::BuildGraph { normalized, output } => {
+            let stats = build::run(&normalized, &output)?;
+            println!("✓ Built + sealed Trust Graph: {}", output.display());
+            println!("  Records resolved: {}", stats.records);
+            println!("  Entities: {}", stats.entities);
+            println!(
+                "    merges — npi: {}, name: {}, fuzzy auto-link: {}",
+                stats.npi_merges, stats.name_merges, stats.fuzzy_auto_links
+            );
+            println!("  Exclusion events: {}", stats.events);
+            println!("  Review link candidates: {}", stats.candidates);
+            if stats.blocks_capped > 0 {
+                println!("  Blocks skipped (over size cap): {}", stats.blocks_capped);
+            }
+            Ok(())
+        }
 
         Commands::Provenance { manifest } => provenance::show(&manifest),
 
