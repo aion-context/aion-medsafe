@@ -410,12 +410,19 @@ fn detect_multi_state(events: &[ExclusionEvent]) -> Option<Hit> {
     }
 }
 
-/// On the federal LEIE but absent from the state Medicaid exclusion list.
+/// A federal exclusion authority (HHS-OIG LEIE or SAM.gov), as opposed to a
+/// state Medicaid list.
+fn is_federal(authority: ExclusionAuthority) -> bool {
+    matches!(
+        authority,
+        ExclusionAuthority::HhsOig | ExclusionAuthority::SamGov
+    )
+}
+
+/// On a federal exclusion list (HHS-OIG LEIE or SAM.gov) but absent from the
+/// state Medicaid exclusion list.
 fn detect_fed_state_mismatch(events: &[ExclusionEvent]) -> Option<Hit> {
-    let federal: Vec<&ExclusionEvent> = events
-        .iter()
-        .filter(|e| e.authority == ExclusionAuthority::HhsOig)
-        .collect();
+    let federal: Vec<&ExclusionEvent> = events.iter().filter(|e| is_federal(e.authority)).collect();
     if federal.is_empty() {
         return None;
     }
@@ -427,7 +434,8 @@ fn detect_fed_state_mismatch(events: &[ExclusionEvent]) -> Option<Hit> {
     }
 
     let description =
-        "on federal HHS-OIG exclusion list but absent from the state Medicaid exclusion list"
+        "on a federal exclusion list (HHS-OIG / SAM.gov) but absent from the state Medicaid \
+         exclusion list"
             .to_string();
     let evidence = federal.iter().map(|e| e.event_id.clone()).collect();
     Some((0.7, description, evidence))
@@ -812,6 +820,17 @@ risk_signals:
         ]);
         let r = compute(&g, &policy(), Some("HI"));
         assert!(find(&r, "federal_state_mismatch").is_none());
+    }
+
+    #[test]
+    fn fed_state_mismatch_fires_on_sam_gov_federal() {
+        // A SAM.gov (federal) exclusion with no state Medicaid listing -> mismatch.
+        let g = graph(&[
+            &entity("E1", "HI"),
+            &excl("a", "E1", "sam_gov", "HI", "2015-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        assert!(find(&r, "federal_state_mismatch").is_some());
     }
 
     #[test]

@@ -14,6 +14,9 @@ sealed Trust Graph. Every input is a verified `.aion`; the output is sealed.
 - Sealed Trust Graph (`provenance/trust_graph.aion`)
 - NPPES national status table built via `aion-medsafe-pipeline nppes-bulk`
   (powers `active_npi_while_excluded`; bulk-first, full coverage)
+- Optional: SAM.gov federal exclusions via `aion-medsafe-pipeline sam-exclusions`
+  (data.gov public extract, no account; healthcare subset with NPI →
+  `federal_state_mismatch` + cross-source networks)
 
 ## Steps
 

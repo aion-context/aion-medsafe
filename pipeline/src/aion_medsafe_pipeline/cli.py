@@ -193,5 +193,38 @@ def nppes_bulk_command(
     )
 
 
+@app.command(name="sam-exclusions")
+def sam_exclusions_command(
+    data_dir: pathlib.Path = typer.Option(
+        pathlib.Path("data"), "--data", "-d", help="Pipeline data directory."
+    ),
+    url: str = typer.Option(None, "--url", help="Override the SAM public-extract URL."),
+    limit: int = typer.Option(None, "--limit", "-l", help="Cap rows written."),
+) -> None:
+    """Download the SAM.gov Exclusions Public Extract (data.gov mirror, no account)
+    and normalize the healthcare-relevant subset (records with an NPI) into the
+    exclusion NDJSON contract. Flows into the Rust graph as source_id `sam_gov`.
+
+    Seal the raw CSV afterwards with `aion-medsafe ingest` for provenance.
+    """
+    from aion_medsafe_pipeline import sam_exclusions
+
+    console.print("[bold]Downloading SAM.gov exclusions public extract...[/bold]")
+    kwargs = {"limit": limit}
+    if url:
+        kwargs["url"] = url
+    result = sam_exclusions.run(data_dir, **kwargs)
+    console.print(f"  Raw CSV: {result['csv']}")
+    console.print(f"  SHA-256: {result['snapshot_hash']}")
+    console.print("[bold]Normalized (healthcare-relevant subset, NPI present):[/bold]")
+    for key, value in result["stats"].items():
+        console.print(f"  {key}: {value:,}")
+    console.print(f"  Saved: {result['out']}")
+    console.print(
+        f"\n[dim]Next: aion-medsafe ingest --file {result['csv']} --source sam_gov "
+        "(seal raw source), then aion-medsafe build-graph[/dim]"
+    )
+
+
 if __name__ == "__main__":
     app()

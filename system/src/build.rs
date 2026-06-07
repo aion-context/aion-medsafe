@@ -25,6 +25,7 @@ const EXCLUSION_FILES: &[&str] = &[
     "leie_normalized.ndjson",
     "leie_supplements_normalized.ndjson",
     "hawaii_medquest_exclusions.ndjson",
+    "sam_exclusions.ndjson",
 ];
 
 const ORG_TOKENS: &[&str] = &[
