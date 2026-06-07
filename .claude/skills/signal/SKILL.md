@@ -66,6 +66,15 @@ The run-meta line carries counts: `signal_count`, `queued_for_review`,
 - `colocated_active_providers` — Excluded provider's address/phone shared by ACTIVE non-excluded NPIs (practice may still be operating under other identities)
 - `billing_after_exclusion` — Needs claims data (reported not-computable until ingested)
 
+## Tracking change over time
+Diff two sealed signal runs to surface only the delta (newly flagged / resolved /
+changed) — the actionable output for a recurring re-scan or monthly data refresh:
+```bash
+cd system && ./target/release/aion-medsafe diff \
+  --from provenance/signals_hi_<earlier>.aion \
+  --to   provenance/signals_hi_<later>.aion
+```
+
 ## Case packets (the investigator deliverable)
 Turn flagged providers into court-defensible dossiers — identity + signals +
 exclusion evidence (with source provenance hashes) + the policy version + a

@@ -11,6 +11,7 @@ mod adjudication;
 mod build;
 mod decisions;
 mod detection;
+mod diff;
 mod error;
 mod graph;
 mod ingest;
@@ -193,6 +194,17 @@ enum Commands {
     /// Show earned per-signal-type precision from adjudicated outcomes
     Calibrate {},
 
+    /// Diff two sealed signal runs (added / resolved / changed)
+    Diff {
+        /// Earlier sealed signal output (.aion)
+        #[arg(short, long)]
+        from: std::path::PathBuf,
+
+        /// Later sealed signal output (.aion)
+        #[arg(short, long)]
+        to: std::path::PathBuf,
+    },
+
     /// Generate court-defensible case packets for flagged providers
     Packet {
         /// Path to the sealed detection policy (.aion)
@@ -341,6 +353,8 @@ fn main() -> anyhow::Result<()> {
         } => adjudicate(&signal_id, &signal_type, &entity, &verdict, author, &reason),
 
         Commands::Calibrate {} => calibrate_report(),
+
+        Commands::Diff { from, to } => diff::run(&from, &to),
 
         Commands::Packet {
             policy,
