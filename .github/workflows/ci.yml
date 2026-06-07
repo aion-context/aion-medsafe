@@ -32,9 +32,12 @@ jobs:
           workspaces: system
       - name: Formatting
         run: cargo fmt --check
-      # Tiger Style gate: warnings (incl. unwrap/expect/panic/todo denies) fail the build.
+      # Tiger Style gate on PRODUCTION code (lib + bins): warnings, incl. the
+      # unwrap/expect/panic/todo denies, fail the build. Not --all-targets —
+      # tests legitimately use unwrap/expect (Tiger Style scope is prod code),
+      # matching scripts/hooks/pre-commit.
       - name: Clippy (-D warnings)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy -- -D warnings
       - name: Tests
         run: cargo test
 
