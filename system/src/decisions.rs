@@ -7,10 +7,10 @@
 //! `build-graph`, confirmed links force a merge and rejected links are
 //! suppressed from the review queue.
 //!
-//! The `.aion` signature provides tamper-evidence and chain of custody; the
-//! `reviewer` field records WHO decided. (Signing each decision with a
-//! per-analyst key from the 80010+ range is a future hardening — see
-//! `.claude/rules/security.md`.)
+//! Each decision is signed with the reviewing analyst's OWN enrolled key
+//! (author 80010+, see `enroll-analyst`), so the `.aion` signature
+//! cryptographically attributes the decision to that reviewer and `load`
+//! refuses anything that does not verify against the registry.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -74,6 +74,7 @@ pub fn load(path: &Path, registry: &KeyRegistry) -> Result<Vec<Decision>> {
 pub fn record(
     path: &Path,
     registry: &KeyRegistry,
+    author_id: u64,
     signing_key: &aion_context::crypto::SigningKey,
     decision: Decision,
 ) -> Result<usize> {
@@ -101,6 +102,7 @@ pub fn record(
     provenance::commit_payload(
         path,
         payload.as_bytes(),
+        author_id,
         signing_key,
         registry,
         "Record identity-link review decision",
@@ -145,6 +147,8 @@ pub fn verdicts(decisions: &[Decision]) -> Verdicts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aion_context::crypto::SigningKey;
+    use aion_context::types::AuthorId;
 
     fn d(a: &str, b: &str, decision: &str) -> Decision {
         Decision {
@@ -174,6 +178,35 @@ mod tests {
     fn splits_confirmed_and_rejected() {
         let decisions = vec![d("A", "B", CONFIRM), d("C", "D", REJECT)];
         let v = verdicts(&decisions);
+        assert_eq!(v.confirmed.len(), 1);
+        assert_eq!(v.rejected.len(), 1);
+    }
+
+    #[test]
+    fn record_signs_and_appends_a_verified_chain() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("decisions.aion");
+
+        // Registry with an enrolled analyst (author 80010).
+        let key = SigningKey::generate();
+        let mut registry = KeyRegistry::new();
+        registry
+            .register_author(
+                AuthorId::new(80010),
+                key.verifying_key(),
+                key.verifying_key(),
+                0,
+            )
+            .expect("register analyst");
+
+        let total = record(&path, &registry, 80010, &key, d("E1", "E2", CONFIRM)).expect("record");
+        assert_eq!(total, 1);
+
+        // Second decision appends a new sealed version to the chain.
+        record(&path, &registry, 80010, &key, d("E3", "E4", REJECT)).expect("record 2");
+        let loaded = load(&path, &registry).expect("load");
+        assert_eq!(loaded.len(), 2);
+        let v = verdicts(&loaded);
         assert_eq!(v.confirmed.len(), 1);
         assert_eq!(v.rejected.len(), 1);
     }

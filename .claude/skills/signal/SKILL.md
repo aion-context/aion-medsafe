@@ -69,20 +69,24 @@ jurisdiction-filtered (a candidate appears if either entity has a nexus to the
 jurisdiction) and ordered by confidence.
 
 ### Acting on the queue (closes the loop)
-Record a reviewer's verdict; it is appended to a sealed, hash-chained decision
-log. Re-run `build-graph` to apply: confirmed links force a merge, rejected
-links are kept separate and suppressed from the queue.
+First, enroll each reviewer once (generates + registers their signing key):
+```bash
+cd system && ./target/release/aion-medsafe enroll-analyst --author 80010
+```
+Record a verdict; it is signed with that analyst's key and appended to a sealed,
+hash-chained decision log. Re-run `build-graph` to apply: confirmed links force a
+merge, rejected links are kept separate and suppressed from the queue.
 ```bash
 cd system
-# confirm two entities are the same provider
+# confirm two entities are the same provider (signed by analyst 80010)
 ./target/release/aion-medsafe decide --a "<entity_id_a>" --b "<entity_id_b>" \
-  --decision confirm --reviewer <analyst_id> --reason "<why>"
+  --decision confirm --author 80010 --reason "<why>"
 # or reject
-./target/release/aion-medsafe decide --a "<id_a>" --b "<id_b>" --decision reject
+./target/release/aion-medsafe decide --a "<id_a>" --b "<id_b>" --decision reject --author 80010
 ./target/release/aion-medsafe decisions          # list current verdicts
 ./target/release/aion-medsafe build-graph         # apply (confirm→merge, reject→suppress)
 ```
 The decision log (`decisions/identity_decisions.aion`) is authoritative
-operational state — not regenerable. Decisions are tamper-evident via the seal;
-the `reviewer` field records who decided (per-analyst signing keys are a future
-hardening).
+operational state — not regenerable. Each decision is cryptographically
+attributable: signed by the reviewing analyst's enrolled key (author 80010+),
+verified against the registry on load.

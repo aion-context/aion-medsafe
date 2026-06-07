@@ -18,15 +18,27 @@ use aion_context::operations::{
     commit_version, init_file, show_current_rules, verify_file, CommitOptions, InitOptions,
 };
 use aion_context::types::AuthorId;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::{MedsafeError, Result};
 
 /// Pipeline automation author ID (range 80001-80009)
 const PIPELINE_AUTHOR: u64 = 80001;
 
-/// Default path for the signing key (seed bytes).
+/// Default path for the pipeline signing key (seed bytes).
 const DEFAULT_KEY_PATH: &str = ".aion/pipeline.key";
+
+/// On-disk path for an author's private signing key (seed bytes). The pipeline
+/// automation key keeps its legacy path; every other author (analysts 80010+,
+/// legal 80020+, admin 80030+) gets `.aion/author_<id>.key`. All `*.key` files
+/// are gitignored — only public keys live in the committed registry.
+pub fn author_key_path(author_id: u64) -> PathBuf {
+    if author_id == PIPELINE_AUTHOR {
+        PathBuf::from(DEFAULT_KEY_PATH)
+    } else {
+        PathBuf::from(format!(".aion/author_{author_id}.key"))
+    }
+}
 
 /// Default path for the key registry (public keys only — safe to commit).
 pub const DEFAULT_REGISTRY_PATH: &str = ".aion/medsafe.registry.json";
@@ -93,11 +105,12 @@ pub fn seal_payload(
 pub fn commit_payload(
     path: &Path,
     payload: &[u8],
+    author_id: u64,
     signing_key: &SigningKey,
     registry: &KeyRegistry,
     message: &str,
 ) -> Result<()> {
-    let author = AuthorId::new(PIPELINE_AUTHOR);
+    let author = AuthorId::new(author_id);
     if path.exists() {
         let options = CommitOptions {
             author_id: author,
@@ -259,16 +272,66 @@ fn preflight_header_bounds(file_bytes: &[u8], path: &Path) -> Result<()> {
 
 /// Load the pipeline signing key from disk.
 pub fn load_signing_key() -> anyhow::Result<SigningKey> {
-    let key_path = Path::new(DEFAULT_KEY_PATH);
+    load_signing_key_for(PIPELINE_AUTHOR)
+}
+
+/// Load a specific author's signing key from disk.
+pub fn load_signing_key_for(author_id: u64) -> anyhow::Result<SigningKey> {
+    let key_path = author_key_path(author_id);
     if !key_path.exists() {
+        let hint = if author_id == PIPELINE_AUTHOR {
+            "Run `aion-medsafe init` first.".to_string()
+        } else {
+            format!("Run `aion-medsafe enroll-analyst --author {author_id}` first.")
+        };
         anyhow::bail!(
-            "Signing key not found at {}. Run `aion-medsafe init` first.",
+            "Signing key for author {author_id} not found at {}. {hint}",
             key_path.display()
         );
     }
-    let key_bytes = std::fs::read(key_path)?;
+    let key_bytes = std::fs::read(&key_path)?;
     let key = SigningKey::from_bytes(&key_bytes)?;
     Ok(key)
+}
+
+/// Enroll a non-pipeline author (analyst/legal/admin) into the registry.
+///
+/// Generates a keypair, registers the PUBLIC key in the (committed) registry,
+/// and writes the PRIVATE key to `.aion/author_<id>.key` (gitignored). After
+/// enrollment, that author can sign decisions whose signatures verify against
+/// the registry — making each decision cryptographically attributable.
+pub fn enroll_author(registry_path: &Path, author_id: u64) -> anyhow::Result<()> {
+    if (PIPELINE_AUTHOR..PIPELINE_AUTHOR + 9).contains(&author_id) {
+        anyhow::bail!(
+            "author {author_id} is in the pipeline-automation range (80001-80009); \
+             reviewers must be analyst/legal/admin (80010+)"
+        );
+    }
+    let key_path = author_key_path(author_id);
+    if key_path.exists() {
+        anyhow::bail!(
+            "author {author_id} already has a key at {}; refusing to overwrite",
+            key_path.display()
+        );
+    }
+
+    let mut registry = load_registry(registry_path)?;
+    let key = SigningKey::generate();
+    registry.register_author(
+        AuthorId::new(author_id),
+        key.verifying_key(),
+        key.verifying_key(),
+        0,
+    )?;
+    std::fs::write(registry_path, registry.to_trusted_json()?)?;
+
+    if let Some(parent) = key_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&key_path, key.to_bytes())?;
+
+    tracing::info!(event = "author_enrolled", author_id, key = %key_path.display());
+    Ok(())
 }
 
 /// Initialize the key registry for AION-MEDSAFE.

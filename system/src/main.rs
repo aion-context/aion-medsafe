@@ -114,6 +114,17 @@ enum Commands {
         decisions: std::path::PathBuf,
     },
 
+    /// Enroll a reviewer (analyst/legal/admin, 80010+): generate + register a signing key
+    EnrollAnalyst {
+        /// Author id for the reviewer (e.g. 80010 for an analyst)
+        #[arg(short, long)]
+        author: u64,
+
+        /// Path to the key registry
+        #[arg(short, long, default_value = ".aion/medsafe.registry.json")]
+        registry: std::path::PathBuf,
+    },
+
     /// Record a human review decision on an identity link (confirm or reject)
     Decide {
         /// First entity id
@@ -128,9 +139,10 @@ enum Commands {
         #[arg(short, long)]
         decision: String,
 
-        /// Reviewer identifier (recorded in the decision)
-        #[arg(short, long, default_value = "analyst")]
-        reviewer: String,
+        /// Reviewer author id (must be enrolled via `enroll-analyst`); the
+        /// decision is signed with this author's key — cryptographic attribution
+        #[arg(long)]
+        author: u64,
 
         /// Optional free-text reason
         #[arg(long, default_value = "")]
@@ -222,14 +234,25 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
 
+        Commands::EnrollAnalyst { author, registry } => {
+            provenance::enroll_author(&registry, author)?;
+            println!("✓ Enrolled author {author}");
+            println!("  Registry: {} (public key added)", registry.display());
+            println!(
+                "  Private key: {}",
+                provenance::author_key_path(author).display()
+            );
+            Ok(())
+        }
+
         Commands::Decide {
             a,
             b,
             decision,
-            reviewer,
+            author,
             reason,
             decisions,
-        } => decide(&a, &b, &decision, &reviewer, &reason, &decisions),
+        } => decide(&a, &b, &decision, author, &reason, &decisions),
 
         Commands::Decisions { decisions } => list_decisions(&decisions),
 
@@ -248,7 +271,7 @@ fn decide(
     a: &str,
     b: &str,
     decision: &str,
-    reviewer: &str,
+    author: u64,
     reason: &str,
     decisions_path: &std::path::Path,
 ) -> anyhow::Result<()> {
@@ -261,18 +284,19 @@ fn decide(
     }
     let registry =
         provenance::load_registry(std::path::Path::new(provenance::DEFAULT_REGISTRY_PATH))?;
-    let signing_key = provenance::load_signing_key()?;
+    // Sign with the analyst's enrolled key — fails if the author isn't enrolled.
+    let signing_key = provenance::load_signing_key_for(author)?;
     let record = decisions::Decision {
         entity_a: a.to_string(),
         entity_b: b.to_string(),
         decision: decision.to_string(),
-        reviewer: reviewer.to_string(),
+        reviewer: author.to_string(),
         reason: reason.to_string(),
         decided_at: chrono::Utc::now().to_rfc3339(),
     };
-    let total = decisions::record(decisions_path, &registry, &signing_key, record)?;
+    let total = decisions::record(decisions_path, &registry, author, &signing_key, record)?;
 
-    println!("✓ Recorded {decision}: {a} ⇄ {b} (reviewer: {reviewer})");
+    println!("✓ Recorded {decision}: {a} ⇄ {b} (signed by author {author})");
     println!(
         "  Sealed decision log: {} ({total} decisions)",
         decisions_path.display()
