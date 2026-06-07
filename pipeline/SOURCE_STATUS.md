@@ -6,8 +6,8 @@ Validated on 2026-06-06 using lightweight HTTP probes. Large files were not full
 
 | Source | Status | Retrieval Notes | Next Implementation Step |
 | --- | --- | --- | --- |
-| NPPES NPI Registry API | Reachable | API returned JSON for a known NPI query. | Implement API client for targeted lookups. |
-| NPPES Downloadable Files | Reachable | HTML index exposes monthly and weekly ZIP files. Representative weekly ZIP returned `application/zip` with `Last-Modified`. | Implement index parser, ZIP snapshot downloader, SHA-256 sealing, and CSV extraction. |
+| NPPES Downloadable Files (bulk) | Implemented | `nppes_bulk.py` scrapes the index, downloads the full monthly dissemination + deactivation ZIPs, and normalizes the npidata CSV (field map ported from the npi-verify PoC) into the national NPI status table. **This is the bulk-first NPPES source** (ADR-001). | Run `nppes-bulk`; seal the raw ZIP via `ingest`. |
+| NPPES NPI Registry API | Retired | Per-NPI API replaced by the bulk file (full coverage, no rate limits). | — (kept only as a historical note). |
 | HHS-OIG LEIE | Reachable | Download page exposes `UPDATED.csv`, monthly exclusion supplements, reinstatement supplements, and record layout PDF. | Implement CSV downloader/parser for current database and monthly supplements. |
 | Hawaii Med-QUEST Exclusion/Reinstatement List | Reachable | Public page exposes a current PDF exclusion/reinstatement list. Representative PDF returned `application/pdf` with `Last-Modified`. | Implement page parser and PDF extraction pipeline with manual review fallback. |
 | SAM.gov Exclusions | Docs reachable | OpenAPI spec is reachable. API likely requires key-aware client behavior depending on endpoint and query. | Inspect OpenAPI spec, define auth/config handling, then implement API client. |

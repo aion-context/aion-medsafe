@@ -12,6 +12,8 @@ sealed Trust Graph. Every input is a verified `.aion`; the output is sealed.
 - Registry initialized (`system/.aion/medsafe.registry.json`)
 - Detection policy sealed as `.aion` (`policy/detection_policy.aion`)
 - Sealed Trust Graph (`provenance/trust_graph.aion`)
+- NPPES national status table built via `aion-medsafe-pipeline nppes-bulk`
+  (powers `active_npi_while_excluded`; bulk-first, full coverage)
 
 ## Steps
 

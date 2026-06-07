@@ -228,7 +228,17 @@ fn load_records(dir: &Path) -> anyhow::Result<Vec<NormalizedExclusion>> {
     Ok(records)
 }
 
+/// Map NPI -> is-active, from the normalized NPPES bulk table (npi + status).
+/// Produced by `aion-medsafe-pipeline nppes-bulk`.
 fn load_nppes(path: &Path) -> anyhow::Result<BTreeMap<String, bool>> {
+    #[derive(Deserialize)]
+    struct NppesRow {
+        #[serde(default)]
+        npi: String,
+        #[serde(default)]
+        status: String,
+    }
+
     let mut active = BTreeMap::new();
     if !path.exists() {
         return Ok(active);
@@ -239,14 +249,10 @@ fn load_nppes(path: &Path) -> anyhow::Result<BTreeMap<String, bool>> {
         if line.trim().is_empty() {
             continue;
         }
-        let value: Value = serde_json::from_str(&line)?;
-        let number = match &value["number"] {
-            Value::String(s) => s.clone(),
-            Value::Number(n) => n.to_string(),
-            _ => continue,
-        };
-        let is_active = value["basic"]["status"].as_str() == Some("A");
-        active.insert(number, is_active);
+        let row: NppesRow = serde_json::from_str(&line)?;
+        if !row.npi.is_empty() {
+            active.insert(row.npi, row.status == "ACTIVE");
+        }
     }
     Ok(active)
 }

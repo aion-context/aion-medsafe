@@ -148,50 +148,53 @@ def fetch(
         for r in all_records[:max_records]:
             console.print(f"  {r.person_or_entity_name} | NPI={r.npi} | Excl={r.exclusion_date} | Reinst={r.reinstatement_date} | State={r.state}")
 
-    elif source.lower() == "nppes":
-        # Back-compat: `fetch nppes` now delegates to the resumable enricher.
-        from aion_medsafe_pipeline.nppes import fetch_nppes
-
-        console.print("[bold]Enriching excluded providers with NPPES NPI data...[/bold]")
-        limit = max_records if max_records else None
-        stats = fetch_nppes(output_dir / "normalized", limit=limit)
-        for key, value in stats.items():
-            console.print(f"  {key}: {value}")
-
     else:
         console.print(f"[red]Unknown source: {source}[/red]")
         raise typer.Exit(code=1)
 
 
-@app.command(name="enrich-nppes")
-def enrich_nppes_command(
-    normalized_dir: pathlib.Path = typer.Option(
-        pathlib.Path("data/normalized"),
-        "--normalized",
-        "-n",
-        help="Directory holding the normalized exclusion + NPPES NDJSON.",
+@app.command(name="nppes-bulk")
+def nppes_bulk_command(
+    data_dir: pathlib.Path = typer.Option(
+        pathlib.Path("data"), "--data", "-d", help="Pipeline data directory."
     ),
-    state: str = typer.Option(
-        None, "--state", "-s", help="Only fetch NPIs with this state nexus (e.g. HI)."
-    ),
+    monthly_url: str = typer.Option(None, "--monthly-url", help="Override monthly ZIP URL."),
     limit: int = typer.Option(
-        None, "--limit", "-l", help="Max NPIs to fetch this run (resumable)."
+        None, "--limit", "-l", help="Cap rows written (for a quick partial run)."
     ),
 ) -> None:
-    """Fetch NPPES NPI status for excluded providers (resumable, rate-limited).
+    """Download the full CMS NPPES bulk file and normalize it to a national NPI
+    status table (NDJSON). This is the bulk-first replacement for per-NPI API
+    lookups; it powers `active_npi_while_excluded` with 100% coverage.
 
-    Powers the `active_npi_while_excluded` signal. Re-run to extend coverage;
-    already-fetched NPIs are skipped. Use `--state HI` to prioritize a
-    jurisdiction.
+    Seal the raw ZIP afterwards with `aion-medsafe ingest` for provenance.
     """
-    from aion_medsafe_pipeline.nppes import fetch_nppes
-
-    console.print(
-        f"[bold]Fetching NPPES[/bold] (state={state or 'all'}, limit={limit or 'none'})"
+    from aion_medsafe_pipeline.nppes_bulk import (
+        download_bulk,
+        extract_main_csv,
+        process_bulk,
     )
-    stats = fetch_nppes(normalized_dir, state=state, limit=limit)
+
+    console.print("[bold]Downloading NPPES bulk dissemination file...[/bold]")
+    hashes = download_bulk(data_dir, monthly_url=monthly_url)
+    monthly_path = next(
+        pathlib.Path(p) for p in hashes if "Dissemination" in p and "Weekly" not in p
+    )
+    snapshot_hash = hashes[str(monthly_path)]
+    console.print(f"  Monthly ZIP: {monthly_path.name}")
+    console.print(f"  SHA-256: {snapshot_hash}")
+
+    console.print("[bold]Extracting + normalizing...[/bold]")
+    csv_path = extract_main_csv(monthly_path, data_dir / "raw" / "nppes_bulk")
+    out_path = data_dir / "normalized" / "nppes_providers.ndjson"
+    stats = process_bulk(csv_path, out_path, snapshot_hash, limit=limit)
     for key, value in stats.items():
-        console.print(f"  {key}: {value}")
+        console.print(f"  {key}: {value:,}")
+    console.print(f"  Saved: {out_path}")
+    console.print(
+        f"\n[dim]Next: aion-medsafe ingest --file {monthly_path} --source nppes_bulk "
+        "(seal raw source), then aion-medsafe build-graph[/dim]"
+    )
 
 
 if __name__ == "__main__":
