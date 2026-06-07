@@ -33,6 +33,7 @@ const COMPUTABLE: &[&str] = &[
     "npi_deactivation_after_exclusion",
     "shared_practice_location",
     "colocated_active_providers",
+    "adverse_action_coverage",
 ];
 
 /// A computed risk signal. NOT an accusation — an evidence-ranked indicator
@@ -308,6 +309,11 @@ fn run_detectors(
             hits.push(("colocated_active_providers", h));
         }
     }
+    if policy.has_signal("adverse_action_coverage") {
+        if let Some(h) = detect_adverse_action_coverage(events) {
+            hits.push(("adverse_action_coverage", h));
+        }
+    }
 
     hits
 }
@@ -439,6 +445,51 @@ fn detect_fed_state_mismatch(events: &[ExclusionEvent]) -> Option<Hit> {
             .to_string();
     let evidence = federal.iter().map(|e| e.event_id.clone()).collect();
     Some((0.7, description, evidence))
+}
+
+/// Independent oversight tier for an authority. HHS-OIG and SAM.gov are both
+/// federal (and largely reciprocal), so they collapse to one tier — appearing on
+/// both is not independent corroboration.
+fn oversight_tier(authority: ExclusionAuthority) -> &'static str {
+    match authority {
+        ExclusionAuthority::HhsOig | ExclusionAuthority::SamGov => "federal",
+        ExclusionAuthority::StateMedicaid => "state Medicaid",
+        ExclusionAuthority::StateLicense => "state licensing",
+    }
+}
+
+fn authority_label(authority: ExclusionAuthority) -> &'static str {
+    match authority {
+        ExclusionAuthority::HhsOig => "HHS-OIG (LEIE)",
+        ExclusionAuthority::SamGov => "SAM.gov",
+        ExclusionAuthority::StateMedicaid => "State Medicaid",
+        ExclusionAuthority::StateLicense => "State licensing board",
+    }
+}
+
+/// Flagged by MULTIPLE independent oversight tiers (federal, state Medicaid,
+/// state licensing). Cross-tier corroboration is a far stronger lead than any one
+/// list — and unlike `multi_state_exclusion` it captures same-state breadth
+/// across different oversight bodies. Same-tier overlap (e.g. LEIE + SAM, both
+/// federal) does NOT fire (it is largely reciprocal, not independent).
+fn detect_adverse_action_coverage(events: &[ExclusionEvent]) -> Option<Hit> {
+    let tiers: BTreeSet<&str> = events.iter().map(|e| oversight_tier(e.authority)).collect();
+    if tiers.len() < 2 {
+        return None;
+    }
+    let labels: BTreeSet<&str> = events
+        .iter()
+        .map(|e| authority_label(e.authority))
+        .collect();
+    let confidence = (0.75 + 0.10 * (tiers.len() as f64 - 1.0)).min(0.97);
+    let description = format!(
+        "flagged by {} independent oversight tiers ({}); lists: {}",
+        tiers.len(),
+        tiers.iter().copied().collect::<Vec<_>>().join(" + "),
+        labels.iter().copied().collect::<Vec<_>>().join(", "),
+    );
+    let evidence = labels.iter().map(|s| s.to_string()).collect();
+    Some((confidence, description, evidence))
 }
 
 /// NPI still active in NPPES while the provider is under active exclusion.
@@ -586,6 +637,7 @@ risk_signals:
   npi_deactivation_after_exclusion: {severity: 0.80, description: "x", requires_human_review: true}
   shared_practice_location: {severity: 0.75, description: "x", requires_human_review: true}
   colocated_active_providers: {severity: 0.80, description: "x", requires_human_review: true}
+  adverse_action_coverage: {severity: 0.85, description: "x", requires_human_review: true}
   billing_after_exclusion: {severity: 1.0, description: "x", requires_human_review: true}
 "#;
 
@@ -820,6 +872,44 @@ risk_signals:
         ]);
         let r = compute(&g, &policy(), Some("HI"));
         assert!(find(&r, "federal_state_mismatch").is_none());
+    }
+
+    #[test]
+    fn adverse_action_coverage_fires_across_tiers() {
+        // Federal (HHS-OIG) + state Medicaid = 2 independent tiers -> fires.
+        let g = graph(&[
+            &entity("E1", "HI"),
+            &excl("a", "E1", "hhs_oig", "HI", "2015-01-01T00:00:00Z"),
+            &excl("b", "E1", "state_medicaid", "HI", "2016-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        let sig = find(&r, "adverse_action_coverage").expect("fires across tiers");
+        assert!((sig.confidence - 0.85).abs() < 1e-9);
+    }
+
+    #[test]
+    fn adverse_action_coverage_does_not_fire_same_tier() {
+        // HHS-OIG + SAM.gov are both federal (reciprocal) -> one tier -> no fire.
+        let g = graph(&[
+            &entity("E1", "HI"),
+            &excl("a", "E1", "hhs_oig", "HI", "2015-01-01T00:00:00Z"),
+            &excl("b", "E1", "sam_gov", "HI", "2016-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        assert!(find(&r, "adverse_action_coverage").is_none());
+    }
+
+    #[test]
+    fn adverse_action_coverage_three_tiers_scores_higher() {
+        let g = graph(&[
+            &entity("E1", "HI"),
+            &excl("a", "E1", "hhs_oig", "HI", "2015-01-01T00:00:00Z"),
+            &excl("b", "E1", "state_medicaid", "HI", "2016-01-01T00:00:00Z"),
+            &excl("c", "E1", "state_license", "HI", "2017-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        let sig = find(&r, "adverse_action_coverage").expect("fires");
+        assert!((sig.confidence - 0.95).abs() < 1e-9);
     }
 
     #[test]

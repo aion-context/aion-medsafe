@@ -65,6 +65,12 @@ risk_signals:
     requires_human_review: true
     escalation: "analyst"
 
+  adverse_action_coverage:
+    severity: 0.85
+    description: "Provider flagged by multiple independent oversight tiers (federal, state Medicaid, state licensing) — cross-corroborated adverse action."
+    requires_human_review: true
+    escalation: "analyst"
+
   # Defined for completeness but NOT computable until claims/MMIS data is
   # ingested (PROTECTED class, future gate). The engine reports this signal
   # type as not-computable rather than fabricating a result.

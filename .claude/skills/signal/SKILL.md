@@ -70,6 +70,7 @@ The run-meta line carries counts: `signal_count`, `queued_for_review`,
 - `npi_deactivation_after_exclusion` — NPI deactivated *after* exclusion (possible attempt to disappear)
 - `shared_practice_location` — Excluded providers sharing a practice address/phone (shell clinic / ownership network)
 - `colocated_active_providers` — Excluded provider's address/phone shared by ACTIVE non-excluded NPIs (practice may still be operating under other identities)
+- `adverse_action_coverage` — Flagged by ≥2 independent oversight tiers (federal HHS-OIG/SAM, state Medicaid, state licensing) — cross-corroborated lead
 - `billing_after_exclusion` — Needs claims data (reported not-computable until ingested)
 
 ## Tracking change over time
