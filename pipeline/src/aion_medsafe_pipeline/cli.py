@@ -250,5 +250,29 @@ def cms_owners_command(
     console.print(f"  Saved: {result['out']}")
 
 
+@app.command(name="hawaii-licensing")
+def hawaii_licensing_command(
+    data_dir: pathlib.Path = typer.Option(
+        pathlib.Path("data"), "--data", "-d", help="Pipeline data directory."
+    ),
+    url: str = typer.Option(None, "--url", help="Override the DCCA release page URL."),
+) -> None:
+    """Fetch the Hawaii DCCA/OAH disciplinary-actions release page (public, no
+    account) and normalize the healthcare-board, exclusion-like sanctions
+    (revocation/suspension/surrender) into the exclusion NDJSON contract.
+
+    Lower precision than other sources: name-only matching, HI-scoped, no NPI.
+    Flows into the Rust graph as source_id `hawaii_dcca_license` (StateLicense).
+    """
+    from aion_medsafe_pipeline import hawaii_licensing
+
+    console.print("[bold]Fetching Hawaii DCCA disciplinary actions...[/bold]")
+    result = hawaii_licensing.run(data_dir, urls=[url] if url else None)
+    console.print("[bold]Normalized (healthcare boards, serious sanctions):[/bold]")
+    for key, value in result["stats"].items():
+        console.print(f"  {key}: {value:,}")
+    console.print(f"  Saved: {result['out']}")
+
+
 if __name__ == "__main__":
     app()

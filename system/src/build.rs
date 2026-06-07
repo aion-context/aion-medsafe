@@ -26,6 +26,7 @@ const EXCLUSION_FILES: &[&str] = &[
     "leie_supplements_normalized.ndjson",
     "hawaii_medquest_exclusions.ndjson",
     "sam_exclusions.ndjson",
+    "hawaii_dcca_license.ndjson",
 ];
 
 const ORG_TOKENS: &[&str] = &[
@@ -768,6 +769,8 @@ fn entity_type(name: &str) -> EntityType {
 fn authority_for(source_id: &str) -> ExclusionAuthority {
     if source_id.starts_with("hawaii_medquest") {
         ExclusionAuthority::StateMedicaid
+    } else if source_id.starts_with("hawaii_dcca") {
+        ExclusionAuthority::StateLicense
     } else if source_id.starts_with("sam_gov") {
         ExclusionAuthority::SamGov
     } else {

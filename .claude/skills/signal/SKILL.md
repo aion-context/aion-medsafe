@@ -17,6 +17,9 @@ sealed Trust Graph. Every input is a verified `.aion`; the output is sealed.
 - Optional: SAM.gov federal exclusions via `aion-medsafe-pipeline sam-exclusions`
   (data.gov public extract, no account; healthcare subset with NPI →
   `federal_state_mismatch` + cross-source networks)
+- Optional: Hawaii DCCA license discipline via `aion-medsafe-pipeline hawaii-licensing`
+  (public OAH release pages, no account; healthcare-board revocations/suspensions →
+  StateLicense evidence + packet coverage; lower precision — name-only, HI-scoped)
 
 ## Steps
 

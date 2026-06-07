@@ -86,6 +86,8 @@ pub struct CasePacket {
     pub federal_lists: Vec<String>,
     /// Whether the provider is on the state Medicaid exclusion list.
     pub on_state_medicaid: bool,
+    /// Whether the provider has a state licensing-board adverse action.
+    pub state_license_action: bool,
     /// If this excluded party also OWNS active Medicare providers (CMS PECOS).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ownership: Option<OwnershipFinding>,
@@ -116,10 +118,11 @@ impl From<&ExcludedOwnerFinding> for OwnershipFinding {
 }
 
 /// Summarize which exclusion lists name a provider, from its events.
-fn coverage(events: &[ExclusionEvent]) -> (Vec<String>, bool) {
+fn coverage(events: &[ExclusionEvent]) -> (Vec<String>, bool, bool) {
     use std::collections::BTreeSet;
     let mut federal: BTreeSet<String> = BTreeSet::new();
     let mut state_medicaid = false;
+    let mut state_license = false;
     for e in events {
         match e.authority {
             ExclusionAuthority::HhsOig => {
@@ -129,10 +132,10 @@ fn coverage(events: &[ExclusionEvent]) -> (Vec<String>, bool) {
                 federal.insert("SAM.gov".to_string());
             }
             ExclusionAuthority::StateMedicaid => state_medicaid = true,
-            ExclusionAuthority::StateLicense => {}
+            ExclusionAuthority::StateLicense => state_license = true,
         }
     }
-    (federal.into_iter().collect(), state_medicaid)
+    (federal.into_iter().collect(), state_medicaid, state_license)
 }
 
 fn authority_label(a: &crate::graph::ExclusionAuthority) -> String {
@@ -194,7 +197,7 @@ pub fn build_packets(
         };
         let events = graph.events_for(&entity_id);
         let evidence = events.iter().map(EvidenceItem::from_event).collect();
-        let (federal_lists, on_state_medicaid) = coverage(events);
+        let (federal_lists, on_state_medicaid, state_license_action) = coverage(events);
         let ownership = owner_findings.get(&entity_id).map(OwnershipFinding::from);
         packets.push(CasePacket {
             record: "case_packet",
@@ -209,6 +212,7 @@ pub fn build_packets(
             resolution_confidence: entity.resolution_confidence,
             federal_lists,
             on_state_medicaid,
+            state_license_action,
             ownership,
             signals,
             evidence,
@@ -252,6 +256,10 @@ pub fn render_markdown(p: &CasePacket) -> String {
     m.push_str(&format!(
         "- On state Medicaid exclusion list: {}\n",
         p.on_state_medicaid
+    ));
+    m.push_str(&format!(
+        "- State licensing-board adverse action: {}\n",
+        p.state_license_action
     ));
 
     m.push_str("\n## Risk signals\n");
@@ -603,6 +611,36 @@ risk_signals:
         let md = render_markdown(p);
         assert!(md.contains("Ownership of active Medicare providers"));
         assert!(md.contains("SUNSET SNF"));
+    }
+
+    #[test]
+    fn state_license_action_shows_in_coverage() {
+        // HHS-OIG (HI) federal + a state licensing-board action; fed_state_mismatch
+        // flags it (no state Medicaid), and coverage must report the license action.
+        let lines = [
+            r#"{"kind":"entity","entity_id":"E1","entity_type":"individual","canonical_name":"DOE JANE","canonical_state":"HI"}"#.to_string(),
+            r#"{"kind":"exclusion_event","event_id":"a","entity_id":"E1","authority":"hhs_oig","exclusion_date":"2015-01-01T00:00:00Z","status":"active","state":"TX","source_id":"hhs_oig_leie","source_record_id":"7","source_snapshot_hash":"h","observed_at":"t"}"#.to_string(),
+            r#"{"kind":"exclusion_event","event_id":"b","entity_id":"E1","authority":"state_license","exclusion_type":"BOARD OF NURSING — License revoked","exclusion_date":"2016-01-01T00:00:00Z","status":"indefinite","state":"HI","source_id":"hawaii_dcca_license","source_record_id":"RNS-1","source_snapshot_hash":"h2","observed_at":"t"}"#.to_string(),
+        ];
+        let graph = TrustGraph::parse_ndjson(lines.join("\n").as_bytes(), "t").unwrap();
+        let policy: DetectionPolicy = serde_yaml::from_str(POLICY_YAML).unwrap();
+        let packets = build_packets(
+            &graph,
+            &policy,
+            Some("HI"),
+            &attestation(),
+            "t",
+            None,
+            &no_owners(),
+        );
+        let p = &packets[0];
+        assert!(p.state_license_action);
+        let md = render_markdown(p);
+        assert!(md.contains("State licensing-board adverse action: true"));
+        assert!(p
+            .evidence
+            .iter()
+            .any(|e| e.authority == "State licensing board"));
     }
 
     #[test]
