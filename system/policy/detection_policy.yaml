@@ -59,6 +59,12 @@ risk_signals:
     requires_human_review: true
     escalation: "analyst"
 
+  colocated_active_providers:
+    severity: 0.80
+    description: "Excluded provider's practice address/phone is shared by active, non-excluded NPIs — the practice may still be operating under other identities."
+    requires_human_review: true
+    escalation: "analyst"
+
   # Defined for completeness but NOT computable until claims/MMIS data is
   # ingested (PROTECTED class, future gate). The engine reports this signal
   # type as not-computable rather than fabricating a result.

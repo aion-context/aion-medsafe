@@ -63,6 +63,7 @@ The run-meta line carries counts: `signal_count`, `queued_for_review`,
 - `active_npi_while_excluded` — Excluded but NPI active in NPPES
 - `npi_deactivation_after_exclusion` — NPI deactivated *after* exclusion (possible attempt to disappear)
 - `shared_practice_location` — Excluded providers sharing a practice address/phone (shell clinic / ownership network)
+- `colocated_active_providers` — Excluded provider's address/phone shared by ACTIVE non-excluded NPIs (practice may still be operating under other identities)
 - `billing_after_exclusion` — Needs claims data (reported not-computable until ingested)
 
 ## The identity review queue

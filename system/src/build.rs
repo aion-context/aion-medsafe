@@ -168,6 +168,33 @@ pub fn run(
     let clusters = group_clusters(&cluster_of);
     let entity_id_by_rep = entity_ids(&clusters, &records, &npis);
 
+    // Second NPPES pass: count active, non-excluded NPIs co-located (by address
+    // or phone) with the excluded providers — "is the practice still operating?"
+    let target_addr: BTreeSet<&str> = nppes
+        .values()
+        .filter_map(|i| i.address.as_deref())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let target_phone: BTreeSet<&str> = nppes
+        .values()
+        .filter_map(|i| i.phone.as_deref())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let target_pairs: BTreeSet<String> = nppes
+        .values()
+        .filter_map(|i| match (i.address.as_deref(), i.phone.as_deref()) {
+            (Some(a), Some(p)) if !a.is_empty() && !p.is_empty() => Some(pair_key(a, p)),
+            _ => None,
+        })
+        .collect();
+    let cohorts = scan_cohorts(
+        &normalized_dir.join("nppes_providers.ndjson"),
+        &target_addr,
+        &target_phone,
+        &target_pairs,
+        &wanted,
+    )?;
+
     let payload = render(
         &records,
         &npis,
@@ -177,6 +204,7 @@ pub fn run(
         &resolved,
         &cluster_of,
         &verdicts.rejected,
+        &cohorts,
     );
 
     let signing_key = provenance::load_signing_key()?;
@@ -284,6 +312,99 @@ fn load_nppes(path: &Path, wanted: &BTreeSet<&str>) -> anyhow::Result<BTreeMap<S
     Ok(map)
 }
 
+/// Count of co-located active NPIs at a target address/phone, with a sample.
+#[derive(Default)]
+struct Cohort {
+    count: u32,
+    sample: Vec<String>,
+}
+
+const COHORT_SAMPLE_CAP: usize = 10;
+
+/// Co-location cohorts from the national NPPES table for the excluded providers.
+struct Cohorts {
+    addr: BTreeMap<String, Cohort>,
+    phone: BTreeMap<String, Cohort>,
+    /// Keyed by "address|phone": active NPIs sharing BOTH with an excluded
+    /// provider — the strongest "same operation continues" evidence.
+    both: BTreeMap<String, Cohort>,
+}
+
+fn pair_key(addr: &str, phone: &str) -> String {
+    format!("{addr}|{phone}")
+}
+
+/// Second NPPES pass: for each excluded provider's address/phone (the targets),
+/// count ACTIVE, non-excluded NPIs nationally that share the address, the phone,
+/// or BOTH — i.e. whether the excluded provider's practice is still operating
+/// under other identities.
+fn scan_cohorts(
+    path: &Path,
+    target_addr: &BTreeSet<&str>,
+    target_phone: &BTreeSet<&str>,
+    target_pairs: &BTreeSet<String>,
+    excluded: &BTreeSet<&str>,
+) -> anyhow::Result<Cohorts> {
+    #[derive(Deserialize)]
+    struct Row {
+        #[serde(default)]
+        npi: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        address: Option<String>,
+        #[serde(default)]
+        phone: Option<String>,
+    }
+
+    let mut out = Cohorts {
+        addr: BTreeMap::new(),
+        phone: BTreeMap::new(),
+        both: BTreeMap::new(),
+    };
+    if !path.exists() || target_addr.is_empty() && target_phone.is_empty() {
+        return Ok(out);
+    }
+    let bump = |map: &mut BTreeMap<String, Cohort>, key: String, npi: &str| {
+        let c = map.entry(key).or_default();
+        c.count += 1;
+        if c.sample.len() < COHORT_SAMPLE_CAP {
+            c.sample.push(npi.to_string());
+        }
+    };
+
+    let reader = BufReader::new(std::fs::File::open(path)?);
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let r: Row = serde_json::from_str(&line)?;
+        if r.status != "ACTIVE" || excluded.contains(r.npi.as_str()) {
+            continue;
+        }
+        let addr = r.address.as_deref().filter(|s| !s.is_empty());
+        let phone = r.phone.as_deref().filter(|s| !s.is_empty());
+        if let Some(a) = addr {
+            if target_addr.contains(a) {
+                bump(&mut out.addr, a.to_string(), &r.npi);
+            }
+        }
+        if let Some(p) = phone {
+            if target_phone.contains(p) {
+                bump(&mut out.phone, p.to_string(), &r.npi);
+            }
+        }
+        if let (Some(a), Some(p)) = (addr, phone) {
+            let key = pair_key(a, p);
+            if target_pairs.contains(&key) {
+                bump(&mut out.both, key, &r.npi);
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render(
     records: &[NormalizedExclusion],
@@ -294,11 +415,19 @@ fn render(
     resolved: &resolve::ResolveResult,
     cluster_of: &[usize],
     rejected: &BTreeSet<(String, String)>,
+    cohorts: &Cohorts,
 ) -> String {
     let mut entities = Vec::with_capacity(clusters.len());
     let mut coverage: BTreeSet<String> = BTreeSet::new();
     for (rep, members) in clusters {
-        let entity = build_entity(entity_id_by_rep[rep].clone(), members, records, npis, nppes);
+        let entity = build_entity(
+            entity_id_by_rep[rep].clone(),
+            members,
+            records,
+            npis,
+            nppes,
+            cohorts,
+        );
         if let Some(state) = &entity.canonical_state {
             coverage.insert(state.clone());
         }
@@ -358,6 +487,7 @@ fn build_entity(
     records: &[NormalizedExclusion],
     npis: &[Option<String>],
     nppes: &BTreeMap<String, NppesInfo>,
+    cohorts: &Cohorts,
 ) -> Entity {
     let canonical_name = most_common(
         members
@@ -394,6 +524,28 @@ fn build_entity(
         }
     }
 
+    // Co-located active cohorts (from the national second pass).
+    let addr_cohort = practice_address
+        .as_deref()
+        .and_then(|a| cohorts.addr.get(a));
+    let phone_cohort = practice_phone.as_deref().and_then(|p| cohorts.phone.get(p));
+    let both_cohort = match (practice_address.as_deref(), practice_phone.as_deref()) {
+        (Some(a), Some(p)) => cohorts.both.get(&pair_key(a, p)),
+        _ => None,
+    };
+    let addr_cohort_active = addr_cohort.map(|c| c.count);
+    let phone_cohort_active = phone_cohort.map(|c| c.count);
+    let both_cohort_active = both_cohort.map(|c| c.count);
+    // Evidence: prefer the both-matches sample (strongest), then address/phone.
+    let mut colocated: BTreeSet<String> = BTreeSet::new();
+    for c in [both_cohort, addr_cohort, phone_cohort]
+        .into_iter()
+        .flatten()
+    {
+        colocated.extend(c.sample.iter().cloned());
+    }
+    let colocated_sample: Vec<String> = colocated.into_iter().take(COHORT_SAMPLE_CAP).collect();
+
     let has_npi = !member_npis.is_empty();
     Entity {
         entity_id,
@@ -405,6 +557,10 @@ fn build_entity(
         npi_deactivation_date,
         practice_address,
         practice_phone,
+        addr_cohort_active,
+        phone_cohort_active,
+        both_cohort_active,
+        colocated_sample,
         resolution_confidence: if has_npi || members.len() == 1 {
             1.0
         } else {

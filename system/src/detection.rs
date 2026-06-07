@@ -32,6 +32,7 @@ const COMPUTABLE: &[&str] = &[
     "active_npi_while_excluded",
     "npi_deactivation_after_exclusion",
     "shared_practice_location",
+    "colocated_active_providers",
 ];
 
 /// A computed risk signal. NOT an accusation — an evidence-ranked indicator
@@ -298,6 +299,11 @@ fn run_detectors(
             hits.push(("npi_deactivation_after_exclusion", h));
         }
     }
+    if policy.has_signal("colocated_active_providers") {
+        if let Some(h) = detect_colocated_active(entity) {
+            hits.push(("colocated_active_providers", h));
+        }
+    }
 
     hits
 }
@@ -439,6 +445,55 @@ fn detect_active_npi(entity: &Entity, events: &[ExclusionEvent]) -> Option<Hit> 
     Some((0.85, description, evidence))
 }
 
+/// Above this many co-located active NPIs, a shared address/phone is almost
+/// certainly a facility (medical plaza) or a billing-service line — not a shell
+/// front — so those are suppressed. (Some NPPES phones are shared by 17k+
+/// providers.)
+const FACILITY_CAP: u32 = 20;
+/// A SINGLE shared attribute is only a lead when the cohort is very small;
+/// group practices legitimately co-locate several providers.
+const TINY_COHORT: u32 = 3;
+
+/// An excluded provider's practice address/phone is shared by ACTIVE,
+/// non-excluded NPIs nationally — the practice may still be operating under
+/// other identities. Strongest when address AND phone both match (a "same
+/// front"); a single shared attribute fires only for a tiny cohort. Large
+/// cohorts (facilities / billing services) are suppressed.
+fn detect_colocated_active(entity: &Entity) -> Option<Hit> {
+    let both = entity.both_cohort_active.unwrap_or(0);
+    let addr = entity.addr_cohort_active.unwrap_or(0);
+    let phone = entity.phone_cohort_active.unwrap_or(0);
+    let both_eff = if (1..=FACILITY_CAP).contains(&both) {
+        both
+    } else {
+        0
+    };
+
+    let (confidence, detail) = if both_eff >= 1 {
+        // The SAME active NPI(s) share BOTH the address and phone — strongest.
+        (
+            0.85,
+            format!("address AND phone shared with {both} active provider(s)"),
+        )
+    } else if (1..=TINY_COHORT).contains(&phone) {
+        (
+            0.72,
+            format!("phone shared with {phone} active provider(s)"),
+        )
+    } else if (1..=TINY_COHORT).contains(&addr) {
+        (
+            0.70,
+            format!("address shared with {addr} active provider(s)"),
+        )
+    } else {
+        return None; // facility / billing-service / group-practice cohort
+    };
+
+    let description =
+        format!("excluded provider's practice {detail} — may still be operating under other NPIs");
+    Some((confidence, description, entity.colocated_sample.clone()))
+}
+
 /// NPI deactivated AFTER the provider was excluded — a possible attempt to
 /// "disappear" before resurfacing under a new entity (domain-knowledge.md).
 fn detect_npi_deactivation_after_exclusion(
@@ -517,6 +572,7 @@ risk_signals:
   active_npi_while_excluded: {severity: 0.90, description: "x", requires_human_review: true}
   npi_deactivation_after_exclusion: {severity: 0.80, description: "x", requires_human_review: true}
   shared_practice_location: {severity: 0.75, description: "x", requires_human_review: true}
+  colocated_active_providers: {severity: 0.80, description: "x", requires_human_review: true}
   billing_after_exclusion: {severity: 1.0, description: "x", requires_human_review: true}
 "#;
 
@@ -588,6 +644,47 @@ risk_signals:
             .signals
             .iter()
             .any(|s| s.signal_type == "shared_practice_location" && s.entity_id == "E4"));
+    }
+
+    fn entity_cohort(id: &str, addr: u32, phone: u32, both: u32) -> String {
+        format!(
+            r#"{{"kind":"entity","entity_id":"{id}","entity_type":"individual","canonical_name":"{id}","canonical_state":"HI","addr_cohort_active":{addr},"phone_cohort_active":{phone},"both_cohort_active":{both},"colocated_sample":["1111111111"]}}"#
+        )
+    }
+
+    #[test]
+    fn colocated_active_fires_on_same_npi_sharing_both() {
+        // The SAME active NPIs share BOTH address and phone -> strong "same front".
+        let g = graph(&[
+            &entity_cohort("E1", 5, 5, 3),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        let sig = find(&r, "colocated_active_providers").expect("fires on both-match");
+        assert!(sig.confidence >= 0.85);
+        assert_eq!(sig.evidence, vec!["1111111111".to_string()]);
+    }
+
+    #[test]
+    fn colocated_active_fires_on_tiny_phone_cohort() {
+        let g = graph(&[
+            &entity_cohort("E1", 0, 2, 0),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        assert!(find(&r, "colocated_active_providers").is_some());
+    }
+
+    #[test]
+    fn colocated_active_suppresses_uncorroborated_large_cohorts() {
+        // Address with 8 (group practice) + phone with 17k (billing service),
+        // but NO single NPI sharing both -> suppressed.
+        let g = graph(&[
+            &entity_cohort("E1", 8, 17000, 0),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        assert!(find(&r, "colocated_active_providers").is_none());
     }
 
     #[test]

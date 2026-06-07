@@ -92,6 +92,20 @@ pub struct Entity {
     /// Normalized NPPES practice phone (last 10 digits).
     #[serde(default)]
     pub practice_phone: Option<String>,
+    /// Count of ACTIVE, non-excluded NPPES NPIs nationally sharing this entity's
+    /// practice address — "is the clinic still operating under other identities?"
+    #[serde(default)]
+    pub addr_cohort_active: Option<u32>,
+    /// Same, for the practice phone (a stronger same-operator signal).
+    #[serde(default)]
+    pub phone_cohort_active: Option<u32>,
+    /// Active, non-excluded NPIs sharing BOTH this entity's address AND phone —
+    /// the strongest "the same operation continues" signal.
+    #[serde(default)]
+    pub both_cohort_active: Option<u32>,
+    /// Sample of those co-located active NPIs (evidence; capped).
+    #[serde(default)]
+    pub colocated_sample: Vec<String>,
     // resolution_confidence is carried from entity resolution for display/audit;
     // not yet read by the detectors.
     #[allow(dead_code)]
