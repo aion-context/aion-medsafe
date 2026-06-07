@@ -11,7 +11,7 @@
 //! Later, anyone with the registry can verify that the data we based
 //! our risk signals on matches exactly what the government published.
 
-use aion_context::crypto::SigningKey;
+use aion_context::crypto::{SigningKey, VerifyingKey};
 use aion_context::key_registry::KeyRegistry;
 use aion_context::manifest::{sign_manifest, ArtifactManifestBuilder};
 use aion_context::operations::{
@@ -331,6 +331,60 @@ pub fn enroll_author(registry_path: &Path, author_id: u64) -> anyhow::Result<()>
     std::fs::write(&key_path, key.to_bytes())?;
 
     tracing::info!(event = "author_enrolled", author_id, key = %key_path.display());
+    Ok(())
+}
+
+/// Generate a keypair offline: write the PRIVATE key to `out`, return the PUBLIC
+/// key as hex. The public key is then registered centrally via
+/// [`register_external_author`] — separating key generation (which can happen on
+/// an analyst's machine / HSM) from registration (which the admin performs).
+pub fn keygen(out: &Path) -> anyhow::Result<String> {
+    if out.exists() {
+        anyhow::bail!("refusing to overwrite existing key at {}", out.display());
+    }
+    let key = SigningKey::generate();
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(out, key.to_bytes())?;
+    Ok(hex::encode(key.verifying_key().to_bytes()))
+}
+
+/// Register an externally-held author by PUBLIC KEY only (hex-encoded 32-byte
+/// Ed25519). No private key is generated or stored here — the holder keeps it
+/// (HSM, keyring, another machine). This lets the registry admit a signer whose
+/// past/future logs then verify, without the system ever touching their key.
+pub fn register_external_author(
+    registry_path: &Path,
+    author_id: u64,
+    pubkey_hex: &str,
+) -> anyhow::Result<()> {
+    if (PIPELINE_AUTHOR..PIPELINE_AUTHOR + 9).contains(&author_id) {
+        anyhow::bail!(
+            "author {author_id} is in the pipeline-automation range (80001-80009); \
+             reviewers must be analyst/legal/admin (80010+)"
+        );
+    }
+    let bytes = hex::decode(pubkey_hex.trim())
+        .map_err(|e| anyhow::anyhow!("public key must be hex: {e}"))?;
+    if bytes.len() != 32 {
+        anyhow::bail!(
+            "public key must be 32 bytes (64 hex chars), got {}",
+            bytes.len()
+        );
+    }
+    let verifying_key = VerifyingKey::from_bytes(&bytes)?;
+
+    let mut registry = load_registry(registry_path)?;
+    if registry.master_key(AuthorId::new(author_id)).is_some() {
+        anyhow::bail!("author {author_id} is already registered");
+    }
+    registry.register_author(AuthorId::new(author_id), verifying_key, verifying_key, 0)?;
+    std::fs::write(registry_path, registry.to_trusted_json()?)?;
+
+    tracing::info!(event = "external_author_registered", author_id);
     Ok(())
 }
 

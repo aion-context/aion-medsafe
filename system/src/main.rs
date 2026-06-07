@@ -129,6 +129,28 @@ enum Commands {
         registry: std::path::PathBuf,
     },
 
+    /// Generate a keypair offline (write private key, print public key hex)
+    Keygen {
+        /// Path to write the private signing key
+        #[arg(short, long)]
+        out: std::path::PathBuf,
+    },
+
+    /// Register an externally-held reviewer by public key only (no private key)
+    RegisterKey {
+        /// Author id for the reviewer (analyst/legal/admin, 80010+)
+        #[arg(short, long)]
+        author: u64,
+
+        /// Public key, hex-encoded (32-byte Ed25519)
+        #[arg(short, long)]
+        pubkey: String,
+
+        /// Path to the key registry
+        #[arg(short, long, default_value = ".aion/medsafe.registry.json")]
+        registry: std::path::PathBuf,
+    },
+
     /// Record a human review decision on an identity link (confirm or reject)
     Decide {
         /// First entity id
@@ -318,6 +340,26 @@ fn main() -> anyhow::Result<()> {
             if stats.blocks_capped > 0 {
                 println!("  Blocks skipped (over size cap): {}", stats.blocks_capped);
             }
+            Ok(())
+        }
+
+        Commands::Keygen { out } => {
+            let pubkey = provenance::keygen(&out)?;
+            println!("✓ Keypair generated");
+            println!("  Private key: {} (keep secret; gitignored)", out.display());
+            println!("  Public key (hex): {pubkey}");
+            println!("  Register with: aion-medsafe register-key --author <id> --pubkey {pubkey}");
+            Ok(())
+        }
+
+        Commands::RegisterKey {
+            author,
+            pubkey,
+            registry,
+        } => {
+            provenance::register_external_author(&registry, author, &pubkey)?;
+            println!("✓ Registered author {author} by public key (no private key stored)");
+            println!("  Registry: {} (public key added)", registry.display());
             Ok(())
         }
 

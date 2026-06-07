@@ -98,6 +98,13 @@ First, enroll each reviewer once (generates + registers their signing key):
 ```bash
 cd system && ./target/release/aion-medsafe enroll-analyst --author 80010
 ```
+For an externally-held key (HSM/keyring/another machine), generate it offline and
+register only the PUBLIC key — the system never sees the private key:
+```bash
+cd system
+./target/release/aion-medsafe keygen --out /secure/analyst.key   # prints pubkey hex
+./target/release/aion-medsafe register-key --author 80011 --pubkey <hex>
+```
 Record a verdict; it is signed with that analyst's key and appended to a sealed,
 hash-chained decision log. Re-run `build-graph` to apply: confirmed links force a
 merge, rejected links are kept separate and suppressed from the queue.
