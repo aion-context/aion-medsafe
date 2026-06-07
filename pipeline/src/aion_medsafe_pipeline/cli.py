@@ -149,76 +149,49 @@ def fetch(
             console.print(f"  {r.person_or_entity_name} | NPI={r.npi} | Excl={r.exclusion_date} | Reinst={r.reinstatement_date} | State={r.state}")
 
     elif source.lower() == "nppes":
+        # Back-compat: `fetch nppes` now delegates to the resumable enricher.
+        from aion_medsafe_pipeline.nppes import fetch_nppes
+
         console.print("[bold]Enriching excluded providers with NPPES NPI data...[/bold]")
-
-        leie_path = output_dir / "normalized" / "leie_normalized.ndjson"
-        if not leie_path.exists():
-            console.print("[red]Run 'fetch leie' first to generate the normalized LEIE file.[/red]")
-            raise typer.Exit(code=1)
-
-        npis: list[str] = []
-        with open(leie_path, "r") as f:
-            for line in f:
-                rec = json.loads(line)
-                if rec.get("npi"):
-                    npis.append(rec["npi"])
-
-        unique_npis = sorted(set(npis))
-        console.print(f"  Unique NPIs to look up: {len(unique_npis)}")
-
-        from urllib.request import Request as Req
-        from urllib.request import urlopen as uopen
-        import hashlib
-        from datetime import UTC, datetime
-
-        norm_dir = output_dir / "normalized"
-        norm_dir.mkdir(parents=True, exist_ok=True)
-        norm_path = norm_dir / "nppes_providers.ndjson"
-
-        fetched_at = datetime.now(UTC)
-        results = []
-        errors = 0
-        batch_size = min(len(unique_npis), max_records) if max_records else len(unique_npis)
-        console.print(f"  Fetching first {batch_size} NPIs from NPPES API...")
-
-        for i, npi in enumerate(unique_npis[:batch_size]):
-            try:
-                api_url = f"https://npiregistry.cms.hhs.gov/api/?version=2.1&number={npi}"
-                req = Req(api_url, headers={"User-Agent": "aion-medsafe-pipeline/0.1"})
-                with uopen(req, timeout=20) as resp:
-                    raw = resp.read()
-                data = json.loads(raw)
-                if data.get("result_count", 0) > 0:
-                    result = data["results"][0]
-                    result["_source_id"] = "cms_nppes_npi_registry"
-                    result["_fetched_at"] = fetched_at.isoformat()
-                    result["_snapshot_hash"] = hashlib.sha256(raw).hexdigest()
-                    results.append(result)
-            except Exception:
-                errors += 1
-            if (i + 1) % 50 == 0:
-                console.print(f"    ...{i + 1}/{batch_size} done")
-
-        with open(norm_path, "w", encoding="utf-8") as f:
-            for r in results:
-                f.write(json.dumps(r) + "\n")
-
-        console.print(f"\n[bold]NPPES fetch complete[/bold]")
-        console.print(f"  Fetched: {len(results)}")
-        console.print(f"  Errors: {errors}")
-        console.print(f"  Saved: {norm_path}")
-
-        if results:
-            sample = results[0]
-            console.print(f"\n[bold]Sample record keys:[/bold] {sorted(sample.keys())}")
-            basic = sample.get("basic", {})
-            console.print(f"[bold]Sample basic:[/bold] {json.dumps(basic, indent=2)}")
-            console.print(f"[bold]Addresses:[/bold] {len(sample.get('addresses', []))}")
-            console.print(f"[bold]Taxonomies:[/bold] {len(sample.get('taxonomies', []))}")
+        limit = max_records if max_records else None
+        stats = fetch_nppes(output_dir / "normalized", limit=limit)
+        for key, value in stats.items():
+            console.print(f"  {key}: {value}")
 
     else:
         console.print(f"[red]Unknown source: {source}[/red]")
         raise typer.Exit(code=1)
+
+
+@app.command(name="enrich-nppes")
+def enrich_nppes_command(
+    normalized_dir: pathlib.Path = typer.Option(
+        pathlib.Path("data/normalized"),
+        "--normalized",
+        "-n",
+        help="Directory holding the normalized exclusion + NPPES NDJSON.",
+    ),
+    state: str = typer.Option(
+        None, "--state", "-s", help="Only fetch NPIs with this state nexus (e.g. HI)."
+    ),
+    limit: int = typer.Option(
+        None, "--limit", "-l", help="Max NPIs to fetch this run (resumable)."
+    ),
+) -> None:
+    """Fetch NPPES NPI status for excluded providers (resumable, rate-limited).
+
+    Powers the `active_npi_while_excluded` signal. Re-run to extend coverage;
+    already-fetched NPIs are skipped. Use `--state HI` to prioritize a
+    jurisdiction.
+    """
+    from aion_medsafe_pipeline.nppes import fetch_nppes
+
+    console.print(
+        f"[bold]Fetching NPPES[/bold] (state={state or 'all'}, limit={limit or 'none'})"
+    )
+    stats = fetch_nppes(normalized_dir, state=state, limit=limit)
+    for key, value in stats.items():
+        console.print(f"  {key}: {value}")
 
 
 if __name__ == "__main__":

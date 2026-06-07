@@ -127,9 +127,9 @@ fn resolve_output(output: Option<&Path>, jurisdiction: Option<&str>) -> PathBuf 
         Some(p) => p.to_path_buf(),
         None => {
             let jur = jurisdiction.unwrap_or("national").to_lowercase();
-            // Second precision so re-runs on the same day don't collide
+            // Millisecond precision so back-to-back re-runs don't collide
             // (init_file refuses to overwrite an existing sealed file).
-            let stamp = Utc::now().format("%Y-%m-%dT%H%M%SZ");
+            let stamp = Utc::now().format("%Y-%m-%dT%H%M%S%.3fZ");
             Path::new("provenance").join(format!("signals_{jur}_{stamp}.aion"))
         }
     }
