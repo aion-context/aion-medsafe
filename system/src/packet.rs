@@ -189,11 +189,16 @@ pub fn render_markdown(p: &CasePacket) -> String {
 
     m.push_str("\n## Risk signals\n");
     for s in &p.signals {
+        let earned = s
+            .calibrated_precision
+            .map(|p| format!(", historical precision {:.0}%", p * 100.0))
+            .unwrap_or_default();
         m.push_str(&format!(
-            "- **{}** [{:.2}, severity {:.2}] — {} _({}; review: {})_\n",
+            "- **{}** [confidence {:.2}, severity {:.2}{}] — {} _({}; review: {})_\n",
             s.signal_type,
             s.confidence,
             s.severity,
+            earned,
             s.description,
             s.reason_code,
             s.requires_human_review
@@ -279,6 +284,18 @@ pub fn run(
     let total = packets.len();
     if let Some(n) = limit {
         packets.truncate(n);
+    }
+
+    // Annotate each packet's signals with earned precision (calibration loop).
+    let calibration = crate::adjudication::calibrate(
+        &crate::adjudication::load(
+            Path::new(crate::adjudication::DEFAULT_ADJUDICATIONS_PATH),
+            &registry,
+        )
+        .unwrap_or_default(),
+    );
+    for p in &mut packets {
+        crate::adjudication::annotate(&mut p.signals, &calibration);
     }
 
     // Seal the packets (their own chain of custody).

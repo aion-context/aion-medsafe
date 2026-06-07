@@ -7,6 +7,7 @@
 //! 3. Trust Graph construction and query
 //! 4. Sealed release export (SLSA-attested)
 
+mod adjudication;
 mod build;
 mod decisions;
 mod detection;
@@ -161,6 +162,36 @@ enum Commands {
         decisions: std::path::PathBuf,
     },
 
+    /// Record a reviewer's verdict on a fired signal (true/false positive)
+    Adjudicate {
+        /// Signal id (from the signal output)
+        #[arg(short, long)]
+        signal_id: String,
+
+        /// Signal type (e.g. re_exclusion)
+        #[arg(short, long)]
+        signal_type: String,
+
+        /// Entity id the signal was raised on
+        #[arg(short, long)]
+        entity: String,
+
+        /// Verdict: "tp" (true positive) or "fp" (false positive)
+        #[arg(short, long)]
+        verdict: String,
+
+        /// Reviewer author id (must be enrolled via `enroll-analyst`)
+        #[arg(short, long)]
+        author: u64,
+
+        /// Optional free-text reason
+        #[arg(long, default_value = "")]
+        reason: String,
+    },
+
+    /// Show earned per-signal-type precision from adjudicated outcomes
+    Calibrate {},
+
     /// Generate court-defensible case packets for flagged providers
     Packet {
         /// Path to the sealed detection policy (.aion)
@@ -288,6 +319,17 @@ fn main() -> anyhow::Result<()> {
 
         Commands::Decisions { decisions } => list_decisions(&decisions),
 
+        Commands::Adjudicate {
+            signal_id,
+            signal_type,
+            entity,
+            verdict,
+            author,
+            reason,
+        } => adjudicate(&signal_id, &signal_type, &entity, &verdict, author, &reason),
+
+        Commands::Calibrate {} => calibrate_report(),
+
         Commands::Packet {
             policy,
             graph,
@@ -314,6 +356,68 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// Record an analyst's true/false-positive verdict on a fired signal.
+fn adjudicate(
+    signal_id: &str,
+    signal_type: &str,
+    entity: &str,
+    verdict: &str,
+    author: u64,
+    reason: &str,
+) -> anyhow::Result<()> {
+    let verdict = match verdict {
+        "tp" | "true_positive" => adjudication::TRUE_POSITIVE,
+        "fp" | "false_positive" => adjudication::FALSE_POSITIVE,
+        other => anyhow::bail!("verdict must be \"tp\" or \"fp\", got {other:?}"),
+    };
+    let registry =
+        provenance::load_registry(std::path::Path::new(provenance::DEFAULT_REGISTRY_PATH))?;
+    let signing_key = provenance::load_signing_key_for(author)?;
+    let record = adjudication::Adjudication {
+        signal_id: signal_id.to_string(),
+        signal_type: signal_type.to_string(),
+        entity_id: entity.to_string(),
+        verdict: verdict.to_string(),
+        reviewer: author.to_string(),
+        reason: reason.to_string(),
+        adjudicated_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let path = std::path::Path::new(adjudication::DEFAULT_ADJUDICATIONS_PATH);
+    let total = adjudication::record(path, &registry, author, &signing_key, record)?;
+    println!("✓ Adjudicated {signal_id} ({signal_type}) as {verdict} by author {author}");
+    println!(
+        "  Sealed adjudication log: {} ({total} verdicts)",
+        path.display()
+    );
+    Ok(())
+}
+
+/// Print earned per-signal-type precision from the adjudication log.
+fn calibrate_report() -> anyhow::Result<()> {
+    let registry =
+        provenance::load_registry(std::path::Path::new(provenance::DEFAULT_REGISTRY_PATH))?;
+    let path = std::path::Path::new(adjudication::DEFAULT_ADJUDICATIONS_PATH);
+    let cal = adjudication::calibrate(&adjudication::load(path, &registry)?);
+    if cal.is_empty() {
+        println!("No adjudications recorded yet ({}).", path.display());
+        return Ok(());
+    }
+    println!("Calibration — earned precision per signal type:");
+    for (kind, stats) in &cal {
+        let precision = stats
+            .precision()
+            .map(|p| format!("{:.0}%", p * 100.0))
+            .unwrap_or_else(|| "—".to_string());
+        println!(
+            "  {kind:<34}  n={:<4} tp={:<4} fp={:<4} precision={precision}",
+            stats.total(),
+            stats.tp,
+            stats.fp
+        );
+    }
+    Ok(())
 }
 
 /// Record a human review decision (confirm/reject) on an identity link.

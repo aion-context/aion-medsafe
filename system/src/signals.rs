@@ -43,7 +43,18 @@ pub fn run(
     );
 
     // Step 4-6: compute, jurisdiction filter, threshold + review gate
-    let report = detection::compute(&graph, &policy, jurisdiction);
+    let mut report = detection::compute(&graph, &policy, jurisdiction);
+
+    // Calibration loop: annotate each signal with its type's earned precision
+    // from adjudicated outcomes (if any have been recorded).
+    let calibration = crate::adjudication::calibrate(
+        &crate::adjudication::load(
+            Path::new(crate::adjudication::DEFAULT_ADJUDICATIONS_PATH),
+            &registry,
+        )
+        .unwrap_or_default(),
+    );
+    crate::adjudication::annotate(&mut report.signals, &calibration);
 
     // Entity-resolution review queue (sub-merge identity links for a human).
     let review = detection::review_queue(&graph, jurisdiction);
@@ -217,9 +228,18 @@ fn print_top_signals(report: &DetectionReport) {
     println!();
     println!("  Top signals queued for review:");
     for signal in queued.iter().take(5) {
+        let earned = signal
+            .calibrated_precision
+            .map(|p| format!(" precision~{:.0}%", p * 100.0))
+            .unwrap_or_default();
         println!(
-            "    [{:.2}] {} — {} ({})",
-            signal.confidence, signal.signal_type, signal.entity_name, signal.entity_id
+            "    [{:.2}{}] {} — {} ({})  id={}",
+            signal.confidence,
+            earned,
+            signal.signal_type,
+            signal.entity_name,
+            signal.entity_id,
+            signal.signal_id
         );
     }
 }

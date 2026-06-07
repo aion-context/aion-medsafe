@@ -50,6 +50,10 @@ pub struct ComputedSignal {
     pub requires_human_review: bool,
     pub reason_code: String,
     pub jurisdiction: Option<String>,
+    /// Earned precision for this signal type from adjudicated outcomes (set by
+    /// the calibration loop; `None` until enough verdicts exist).
+    #[serde(default)]
+    pub calibrated_precision: Option<f64>,
 }
 
 /// Outcome of a detection run.
@@ -335,6 +339,7 @@ fn dress(
         requires_human_review: policy.requires_review(signal_type),
         reason_code: reason_code.to_string(),
         jurisdiction: jurisdiction.clone(),
+        calibrated_precision: None,
     }
 }
 
