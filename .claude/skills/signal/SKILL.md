@@ -78,6 +78,20 @@ cd system && ./target/release/aion-medsafe diff \
   --to   provenance/signals_hi_<later>.aion
 ```
 
+## Excluded-owner correlation (CMS PECOS ownership)
+After `aion-medsafe-pipeline cms-owners`, match excluded parties against who owns
+active Medicare providers:
+```bash
+cd system && ./target/release/aion-medsafe owners \
+  --graph provenance/trust_graph.aion \
+  --owners ../pipeline/data/normalized/cms_owners.ndjson [--jurisdiction HI]
+```
+Precision note: CMS public ownership carries no owner NPI/DOB and 0% owner state
+for individuals, so reliable linkage is limited. We emit only credible matches —
+organizations, state-corroborated, or distinctive-name individuals owning ≤2
+providers (0.55, "verify manually") — and transparently report the count of
+common-name individual matches suppressed as collision-prone.
+
 ## Case packets (the investigator deliverable)
 Turn flagged providers into court-defensible dossiers — identity + signals +
 exclusion evidence (with source provenance hashes) + the policy version + a

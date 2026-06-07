@@ -15,6 +15,7 @@ mod diff;
 mod error;
 mod graph;
 mod ingest;
+mod owners;
 mod packet;
 mod policy;
 mod provenance;
@@ -227,6 +228,25 @@ enum Commands {
         to: std::path::PathBuf,
     },
 
+    /// Correlate excluded parties against CMS ownership (excluded owners)
+    Owners {
+        /// Path to the sealed Trust Graph (.aion)
+        #[arg(short, long)]
+        graph: std::path::PathBuf,
+
+        /// Path to the normalized CMS ownership NDJSON (cms_owners.ndjson)
+        #[arg(short, long)]
+        owners: std::path::PathBuf,
+
+        /// Jurisdiction filter (e.g., "HI")
+        #[arg(short, long)]
+        jurisdiction: Option<String>,
+
+        /// Where to write the sealed findings (.aion)
+        #[arg(short = 'O', long)]
+        output: Option<std::path::PathBuf>,
+    },
+
     /// Generate court-defensible case packets for flagged providers
     Packet {
         /// Path to the sealed detection policy (.aion)
@@ -417,6 +437,13 @@ fn main() -> anyhow::Result<()> {
         ),
 
         Commands::Release { binary, output } => release::run(&binary, output.as_deref()),
+
+        Commands::Owners {
+            graph,
+            owners,
+            jurisdiction,
+            output,
+        } => owners::run(&graph, &owners, jurisdiction.as_deref(), output.as_deref()),
 
         Commands::Provenance { manifest } => provenance::show(&manifest),
 
