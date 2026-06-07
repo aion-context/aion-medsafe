@@ -1,0 +1,55 @@
+[package]
+name = "aion-medsafe"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "MIT OR Apache-2.0"
+description = "Medicaid fraud intelligence system with cryptographic provenance via aion-context"
+
+[dependencies]
+# Core governance and provenance
+aion-context = "1.0"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Error handling (Tiger Style — no panics)
+anyhow = "1"
+thiserror = "1"
+
+# Async runtime (for future network fetch of bulk files)
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Hashing (match aion-context primitives)
+blake3 = "1"
+
+# Hex encoding
+hex = "0.4"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# CSV parsing (bulk file ingestion)
+csv = "1"
+
+# Tracing (match aion-context observability)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1"
+test-strategy = "0.4"
+
+# Tiger Style: Zero tolerance for panics in library code
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unreachable = "deny"

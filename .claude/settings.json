@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(du:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(sha256sum:*)",
+      "Bash(python3 -m py_compile:*)",
+      "Bash(system/target/release/aion-medsafe:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(curl:*)",
+      "Bash(wget:*)"
+    ]
+  }
+}

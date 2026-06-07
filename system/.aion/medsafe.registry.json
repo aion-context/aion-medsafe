@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "authors": [
+    {
+      "author_id": 80001,
+      "master_key": "DWIu5b180s8Try/ZG4g0KANRdGNVBF/+Sj/83JyJtHw=",
+      "epochs": [
+        {
+          "epoch": 0,
+          "public_key": "DWIu5b180s8Try/ZG4g0KANRdGNVBF/+Sj/83JyJtHw=",
+          "active_from_version": 0,
+          "status": "active"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+#!/bin/sh
+# AION-MEDSAFE pre-commit gate (version-controlled).
+# Activated via: git config core.hooksPath scripts/hooks
+#
+# Migrated from an invalid hooks.PreCommit block in .claude/settings.json
+# (Claude Code has no PreCommit event). Runs the same three checks, but here
+# they actually execute and block the commit on failure — for every committer,
+# not just Claude. See .claude/rules/security.md and code-style.md.
+
+set -eu
+
+staged() {
+	# Staged (added/copied/modified) files matching the given grep pattern.
+	git diff --cached --name-only --diff-filter=ACM | grep -E "$1" || true
+}
+
+# --- Rust: clippy (warnings = errors) + rustfmt check ---
+if [ -n "$(staged '\.rs$')" ]; then
+	echo "pre-commit: running cargo clippy + fmt --check (system/)"
+	( cd system && cargo clippy -- -D warnings && cargo fmt --check )
+fi
+
+# --- Python: byte-compile staged sources ---
+py_files="$(staged '\.py$')"
+if [ -n "$py_files" ]; then
+	py="$(command -v python3 || command -v python || true)"
+	if [ -z "$py" ]; then
+		echo "pre-commit: ABORT — no python3/python interpreter on PATH" >&2
+		exit 1
+	fi
+	echo "pre-commit: running $py -m py_compile on staged files"
+	# shellcheck disable=SC2086
+	"$py" -m py_compile $py_files
+fi
+
+# --- Secret scan: refuse to commit obvious key material ---
+echo "pre-commit: scanning staged files for secrets"
+if git diff --cached --name-only --diff-filter=ACM \
+	-- '*.py' '*.rs' '*.toml' '*.json' \
+	| grep -vE 'target/|\.venv/' \
+	| while IFS= read -r f; do
+		[ -f "$f" ] && git show ":$f" | grep -nE 'PRIVATE KEY|BEGIN RSA|sk_live|api_key.*=' && echo "  ^ in $f"
+	done \
+	| grep -q .; then
+	echo "pre-commit: ABORT — possible secret detected in staged changes" >&2
+	exit 1
+fi
+
+echo "pre-commit: all checks passed"
