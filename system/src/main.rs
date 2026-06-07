@@ -276,6 +276,10 @@ enum Commands {
         /// Cap the number of packets written (and rendered)
         #[arg(short, long)]
         limit: Option<usize>,
+
+        /// Optional CMS ownership NDJSON — folds excluded-owner findings into packets
+        #[arg(short = 'w', long)]
+        owners: Option<std::path::PathBuf>,
     },
 
     /// Show provenance chain for a data source
@@ -426,6 +430,7 @@ fn main() -> anyhow::Result<()> {
             output,
             render_dir,
             limit,
+            owners,
         } => packet::run(
             &policy,
             &graph,
@@ -434,6 +439,7 @@ fn main() -> anyhow::Result<()> {
             output.as_deref(),
             &render_dir,
             limit,
+            owners.as_deref(),
         ),
 
         Commands::Release { binary, output } => release::run(&binary, output.as_deref()),

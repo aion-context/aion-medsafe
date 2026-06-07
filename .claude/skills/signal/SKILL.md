@@ -100,8 +100,12 @@ verification footer — sealed to `.aion` and rendered to Markdown.
 cd system && ./target/release/aion-medsafe packet \
   --policy policy/detection_policy.aion \
   --graph provenance/trust_graph.aion \
-  --jurisdiction HI [--entity <id>] [--limit N]
+  --jurisdiction HI [--entity <id>] [--limit N] \
+  [--owners ../pipeline/data/normalized/cms_owners.ndjson]
 ```
+With `--owners`, excluded-owner findings (the CMS PECOS correlation) are folded
+into each provider's packet — "this excluded party also OWNS active Medicare
+provider(s)" — with the same precision tiering/labeling as the `owners` command.
 
 ## The identity review queue
 Entity resolution surfaces sub-auto-merge links (e.g. `WOLF ROBERT A ⇄ WOLF

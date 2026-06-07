@@ -197,6 +197,22 @@ fn correlate(graph: &TrustGraph, rows: &[OwnerRow], jurisdiction: Option<&str>) 
     out
 }
 
+/// Load owners + correlate, returning findings keyed by entity id — for callers
+/// (e.g. the case-packet builder) that want to attach ownership to an entity.
+pub(crate) fn findings_by_entity(
+    graph: &TrustGraph,
+    owners_path: &Path,
+    jurisdiction: Option<&str>,
+) -> anyhow::Result<BTreeMap<String, ExcludedOwnerFinding>> {
+    let rows = load_owners(owners_path)?;
+    let result = correlate(graph, &rows, jurisdiction);
+    Ok(result
+        .findings
+        .into_iter()
+        .map(|f| (f.entity_id.clone(), f))
+        .collect())
+}
+
 fn load_owners(path: &Path) -> anyhow::Result<Vec<OwnerRow>> {
     use std::io::{BufRead, BufReader};
     let reader = BufReader::new(std::fs::File::open(path)?);
