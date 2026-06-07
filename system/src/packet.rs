@@ -19,7 +19,7 @@ use chrono::Utc;
 use serde::Serialize;
 
 use crate::detection::{self, ComputedSignal};
-use crate::graph::{Entity, ExclusionEvent, TrustGraph};
+use crate::graph::{Entity, ExclusionAuthority, ExclusionEvent, TrustGraph};
 use crate::policy::DetectionPolicy;
 use crate::provenance;
 
@@ -46,6 +46,9 @@ pub struct EvidenceItem {
     pub source_id: String,
     pub source_record_id: String,
     pub source_snapshot_blake3: String,
+    /// Basis/cause of the exclusion (e.g. SAM exclusion type + excluding agency).
+    #[serde(default)]
+    pub basis: Option<String>,
 }
 
 impl EvidenceItem {
@@ -60,6 +63,7 @@ impl EvidenceItem {
             source_id: e.source_id.clone(),
             source_record_id: e.source_record_id.clone(),
             source_snapshot_blake3: e.source_snapshot_hash.clone(),
+            basis: e.exclusion_type.clone().filter(|s| !s.is_empty()),
         }
     }
 }
@@ -77,9 +81,33 @@ pub struct CasePacket {
     pub npis: Vec<String>,
     pub npi_active: Option<bool>,
     pub resolution_confidence: f64,
+    /// Which federal exclusion lists name this provider (HHS-OIG LEIE, SAM.gov).
+    pub federal_lists: Vec<String>,
+    /// Whether the provider is on the state Medicaid exclusion list.
+    pub on_state_medicaid: bool,
     pub signals: Vec<ComputedSignal>,
     pub evidence: Vec<EvidenceItem>,
     pub attestation: Attestation,
+}
+
+/// Summarize which exclusion lists name a provider, from its events.
+fn coverage(events: &[ExclusionEvent]) -> (Vec<String>, bool) {
+    use std::collections::BTreeSet;
+    let mut federal: BTreeSet<String> = BTreeSet::new();
+    let mut state_medicaid = false;
+    for e in events {
+        match e.authority {
+            ExclusionAuthority::HhsOig => {
+                federal.insert("HHS-OIG (LEIE)".to_string());
+            }
+            ExclusionAuthority::SamGov => {
+                federal.insert("SAM.gov".to_string());
+            }
+            ExclusionAuthority::StateMedicaid => state_medicaid = true,
+            ExclusionAuthority::StateLicense => {}
+        }
+    }
+    (federal.into_iter().collect(), state_medicaid)
 }
 
 fn authority_label(a: &crate::graph::ExclusionAuthority) -> String {
@@ -137,11 +165,9 @@ pub fn build_packets(
         let Some(entity) = entity_by_id.get(entity_id.as_str()) else {
             continue;
         };
-        let evidence = graph
-            .events_for(&entity_id)
-            .iter()
-            .map(EvidenceItem::from_event)
-            .collect();
+        let events = graph.events_for(&entity_id);
+        let evidence = events.iter().map(EvidenceItem::from_event).collect();
+        let (federal_lists, on_state_medicaid) = coverage(events);
         packets.push(CasePacket {
             record: "case_packet",
             packet_id: packet_id(&entity_id, &attestation.policy_version, generated_at),
@@ -153,6 +179,8 @@ pub fn build_packets(
             npis: entity.npis.clone(),
             npi_active: entity.npi_active,
             resolution_confidence: entity.resolution_confidence,
+            federal_lists,
+            on_state_medicaid,
             signals,
             evidence,
             attestation: attestation.clone(),
@@ -186,6 +214,16 @@ pub fn render_markdown(p: &CasePacket) -> String {
         "- Entity-resolution confidence: {:.2}\n",
         p.resolution_confidence
     ));
+    let federal = if p.federal_lists.is_empty() {
+        "none".to_string()
+    } else {
+        p.federal_lists.join(", ")
+    };
+    m.push_str(&format!("- Federal exclusion lists: {federal}\n"));
+    m.push_str(&format!(
+        "- On state Medicaid exclusion list: {}\n",
+        p.on_state_medicaid
+    ));
 
     m.push_str("\n## Risk signals\n");
     for s in &p.signals {
@@ -207,13 +245,19 @@ pub fn render_markdown(p: &CasePacket) -> String {
 
     m.push_str("\n## Exclusion evidence (with source provenance)\n");
     for e in &p.evidence {
+        let basis = e
+            .basis
+            .as_deref()
+            .map(|b| format!(" | basis: {b}"))
+            .unwrap_or_default();
         m.push_str(&format!(
-            "- {} | excl {} | reinst {} | status {} | state {} | source `{}` rec `{}` | snapshot BLAKE3 `{}`\n",
+            "- {} | excl {} | reinst {} | status {} | state {}{} | source `{}` rec `{}` | snapshot BLAKE3 `{}`\n",
             e.authority,
             e.exclusion_date.as_deref().unwrap_or("—"),
             e.reinstatement_date.as_deref().unwrap_or("—"),
             e.status,
             e.state.as_deref().unwrap_or("—"),
+            basis,
             e.source_id,
             e.source_record_id,
             e.source_snapshot_blake3,
@@ -410,6 +454,33 @@ risk_signals:
         let md = render_markdown(p);
         assert!(md.contains("Provenance attestation"));
         assert!(md.contains("abc123"));
+    }
+
+    #[test]
+    fn sam_event_appears_in_federal_coverage_and_evidence_basis() {
+        // HHS-OIG (HI) + SAM.gov (CA, with basis) -> multi_state flags it; the
+        // packet must show both federal lists and the SAM exclusion basis.
+        let lines = [
+            r#"{"kind":"entity","entity_id":"E1","entity_type":"individual","canonical_name":"DOE JANE","canonical_state":"HI","npis":["1234567890"]}"#.to_string(),
+            r#"{"kind":"exclusion_event","event_id":"a","entity_id":"E1","authority":"hhs_oig","exclusion_date":"2015-01-01T00:00:00Z","status":"active","state":"HI","source_id":"hhs_oig_leie","source_record_id":"7","source_snapshot_hash":"abc123","observed_at":"t"}"#.to_string(),
+            r#"{"kind":"exclusion_event","event_id":"b","entity_id":"E1","authority":"sam_gov","exclusion_type":"Healthcare Fraud — HHS/OIG","exclusion_date":"2016-01-01T00:00:00Z","status":"indefinite","state":"CA","source_id":"sam_gov","source_record_id":"S4M1","source_snapshot_hash":"sam999","observed_at":"t"}"#.to_string(),
+        ];
+        let graph = TrustGraph::parse_ndjson(lines.join("\n").as_bytes(), "t").unwrap();
+        let policy: DetectionPolicy = serde_yaml::from_str(POLICY_YAML).unwrap();
+        let packets = build_packets(&graph, &policy, Some("HI"), &attestation(), "t", None);
+        assert_eq!(packets.len(), 1);
+        let p = &packets[0];
+        assert_eq!(p.federal_lists, vec!["HHS-OIG (LEIE)", "SAM.gov"]);
+        assert!(!p.on_state_medicaid);
+        let sam = p
+            .evidence
+            .iter()
+            .find(|e| e.source_id == "sam_gov")
+            .expect("SAM evidence present");
+        assert_eq!(sam.basis.as_deref(), Some("Healthcare Fraud — HHS/OIG"));
+        let md = render_markdown(p);
+        assert!(md.contains("Federal exclusion lists: HHS-OIG (LEIE), SAM.gov"));
+        assert!(md.contains("basis: Healthcare Fraud"));
     }
 
     #[test]

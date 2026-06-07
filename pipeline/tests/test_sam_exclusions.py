@@ -53,6 +53,18 @@ def test_npi_extracted_from_text_field():
     assert rec["npi"] == "1112223334"
 
 
+def test_provider_type_combines_exclusion_type_and_agency():
+    row = _row(
+        classification="Firm",
+        name="X",
+        npi="1234567890",
+        exclusion_type="Healthcare Fraud",
+        excluding_agency="HHS",
+    )
+    rec = sam._normalize_row(row, "h", "t")
+    assert rec["provider_type"] == "Healthcare Fraud — HHS"
+
+
 def test_no_npi_is_dropped():
     row = _row(classification="Firm", name="Non-Healthcare Contractor")
     assert sam._normalize_row(row, "h", "t") is None

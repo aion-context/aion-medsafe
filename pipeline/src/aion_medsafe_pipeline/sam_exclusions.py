@@ -115,6 +115,12 @@ def _normalize_row(row: list[str], snapshot_hash: str, observed_at: str) -> dict
     indefinite = termination.lower() == "indefinite"
     reinstatement = termination if _DATE_RE.match(termination) else None
     state = row[COL["state"]].strip().upper() or None
+    # Basis = SAM exclusion type + the excluding agency (SAM's investigative value
+    # over LEIE: WHY and WHICH agency). Carried via provider_type -> the event's
+    # exclusion_type -> the case packet evidence line.
+    etype = row[COL["exclusion_type"]].strip()
+    agency = row[COL["excluding_agency"]].strip()
+    basis = " — ".join(p for p in (etype, agency) if p) or None
     return {
         "person_or_entity_name": name,
         "npi": npi,
@@ -124,7 +130,7 @@ def _normalize_row(row: list[str], snapshot_hash: str, observed_at: str) -> dict
         "indefinite_exclusion": indefinite,
         "source_id": SOURCE_ID,
         "source_record_id": row[COL["sam_number"]].strip() or None,
-        "provider_type": row[COL["exclusion_type"]].strip() or None,
+        "provider_type": basis,
         "source_snapshot_hash": snapshot_hash,
         "observed_at": observed_at,
     }
