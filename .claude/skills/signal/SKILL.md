@@ -66,6 +66,17 @@ The run-meta line carries counts: `signal_count`, `queued_for_review`,
 - `colocated_active_providers` — Excluded provider's address/phone shared by ACTIVE non-excluded NPIs (practice may still be operating under other identities)
 - `billing_after_exclusion` — Needs claims data (reported not-computable until ingested)
 
+## Case packets (the investigator deliverable)
+Turn flagged providers into court-defensible dossiers — identity + signals +
+exclusion evidence (with source provenance hashes) + the policy version + a
+verification footer — sealed to `.aion` and rendered to Markdown.
+```bash
+cd system && ./target/release/aion-medsafe packet \
+  --policy policy/detection_policy.aion \
+  --graph provenance/trust_graph.aion \
+  --jurisdiction HI [--entity <id>] [--limit N]
+```
+
 ## The identity review queue
 Entity resolution surfaces sub-auto-merge links (e.g. `WOLF ROBERT A ⇄ WOLF
 ROBERT`) for a human to confirm or reject. Confirming a link can change which

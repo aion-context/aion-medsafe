@@ -13,6 +13,7 @@ mod detection;
 mod error;
 mod graph;
 mod ingest;
+mod packet;
 mod policy;
 mod provenance;
 mod resolve;
@@ -160,6 +161,37 @@ enum Commands {
         decisions: std::path::PathBuf,
     },
 
+    /// Generate court-defensible case packets for flagged providers
+    Packet {
+        /// Path to the sealed detection policy (.aion)
+        #[arg(short, long)]
+        policy: std::path::PathBuf,
+
+        /// Path to the sealed Trust Graph (.aion)
+        #[arg(short, long)]
+        graph: std::path::PathBuf,
+
+        /// Jurisdiction filter (e.g., "HI")
+        #[arg(short, long)]
+        jurisdiction: Option<String>,
+
+        /// Generate a packet for a single entity id only
+        #[arg(short, long)]
+        entity: Option<String>,
+
+        /// Where to write the sealed packets (.aion)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+
+        /// Directory for rendered Markdown dossiers
+        #[arg(short, long, default_value = "packets")]
+        render_dir: std::path::PathBuf,
+
+        /// Cap the number of packets written (and rendered)
+        #[arg(short, long)]
+        limit: Option<usize>,
+    },
+
     /// Show provenance chain for a data source
     Provenance {
         /// Path to the provenance manifest (.aion)
@@ -255,6 +287,24 @@ fn main() -> anyhow::Result<()> {
         } => decide(&a, &b, &decision, author, &reason, &decisions),
 
         Commands::Decisions { decisions } => list_decisions(&decisions),
+
+        Commands::Packet {
+            policy,
+            graph,
+            jurisdiction,
+            entity,
+            output,
+            render_dir,
+            limit,
+        } => packet::run(
+            &policy,
+            &graph,
+            jurisdiction.as_deref(),
+            entity.as_deref(),
+            output.as_deref(),
+            &render_dir,
+            limit,
+        ),
 
         Commands::Provenance { manifest } => provenance::show(&manifest),
 

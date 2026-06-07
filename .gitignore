@@ -24,6 +24,10 @@ system/policy/*.aion
 # the sealed hash chain is the audit trail). Back up separately, like a database.
 system/decisions/
 
+# Rendered case-packet Markdown (operational output; the sealed .aion is the
+# authoritative record, and lives in the gitignored provenance/ dir).
+system/packets/
+
 # Registry contains only public keys — safe to commit
 # system/.aion/medsafe.registry.json  ← intentionally NOT ignored
 
