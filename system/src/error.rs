@@ -20,12 +20,17 @@ pub enum MedsafeError {
     #[error("Registry not initialized at {path}")]
     RegistryNotFound { path: PathBuf },
 
+    // Reserved for key-rotation / HSM-backed signing paths (see security.md):
+    // not constructed yet, but part of the error taxonomy operators rely on.
+    #[allow(dead_code)]
     #[error("Signing key not available for author {author_id}")]
     KeyNotAvailable { author_id: u64 },
 
     #[error("Parse error in {source_name}: {reason}")]
     ParseError { source_name: String, reason: String },
 
+    // Reserved for the data-file ⇄ manifest binding check (provenance.md).
+    #[allow(dead_code)]
     #[error("Hash mismatch: expected {expected}, got {actual}")]
     HashMismatch { expected: String, actual: String },
 

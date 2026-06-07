@@ -7,13 +7,9 @@
 //! 3. Trust Graph construction and query
 //! 4. Sealed release export (SLSA-attested)
 
-// In-progress: several error variants, policy fields, and policy accessors are
-// part of the public API surface but not yet wired into the binary's command
-// paths. Allowed crate-wide so the pre-commit `-D warnings` gate still catches
-// every *other* warning. Remove once these are consumed.
-#![allow(dead_code)]
-
+mod detection;
 mod error;
+mod graph;
 mod ingest;
 mod policy;
 mod provenance;
@@ -58,19 +54,46 @@ enum Commands {
         file: std::path::PathBuf,
     },
 
-    /// Compute risk signals (requires verified policy)
+    /// Compute risk signals (requires verified policy + sealed graph)
     Signals {
-        /// Path to the detection policy (.aion)
+        /// Path to the sealed detection policy (.aion)
         #[arg(short, long)]
         policy: std::path::PathBuf,
 
-        /// Path to the Trust Graph export (NDJSON)
+        /// Path to the sealed Trust Graph (.aion, payload = graph NDJSON)
         #[arg(short, long)]
         graph: std::path::PathBuf,
 
         /// Jurisdiction filter (e.g., "HI" for Hawaii)
         #[arg(short, long)]
         jurisdiction: Option<String>,
+
+        /// Where to write the sealed signal output (.aion). Defaults to
+        /// provenance/signals_{jurisdiction}_{date}.aion
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
+
+    /// Seal a plaintext detection policy (YAML) into a signed .aion
+    SealPolicy {
+        /// Path to the plaintext policy rules (YAML)
+        #[arg(short, long)]
+        rules: std::path::PathBuf,
+
+        /// Path to write the sealed policy (.aion)
+        #[arg(short, long)]
+        output: std::path::PathBuf,
+    },
+
+    /// Seal a Trust Graph export (NDJSON) into a signed .aion
+    SealGraph {
+        /// Path to the Trust Graph export (typed NDJSON)
+        #[arg(short, long)]
+        input: std::path::PathBuf,
+
+        /// Path to write the sealed graph (.aion)
+        #[arg(short, long)]
+        output: std::path::PathBuf,
     },
 
     /// Show provenance chain for a data source
@@ -113,7 +136,12 @@ fn main() -> anyhow::Result<()> {
             policy,
             graph,
             jurisdiction,
-        } => signals::run(&policy, &graph, jurisdiction.as_deref()),
+            output,
+        } => signals::run(&policy, &graph, jurisdiction.as_deref(), output.as_deref()),
+
+        Commands::SealPolicy { rules, output } => seal_artifact(&rules, &output, "policy"),
+
+        Commands::SealGraph { input, output } => seal_artifact(&input, &output, "trust_graph"),
 
         Commands::Provenance { manifest } => provenance::show(&manifest),
 
@@ -123,4 +151,31 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// Seal a plaintext governance artifact (policy YAML, graph NDJSON) into a
+/// signed `.aion` whose payload IS the data. Shared by `seal-policy` and
+/// `seal-graph`.
+fn seal_artifact(
+    input: &std::path::Path,
+    output: &std::path::Path,
+    kind: &str,
+) -> anyhow::Result<()> {
+    if !input.exists() {
+        anyhow::bail!("Input file not found: {}", input.display());
+    }
+    let payload = std::fs::read(input)?;
+    let signing_key = provenance::load_signing_key()?;
+    let sealed = provenance::seal_payload(
+        output,
+        &payload,
+        &signing_key,
+        &format!("Seal {kind}: {}", input.display()),
+    )?;
+
+    println!("✓ Sealed {kind}: {}", input.display());
+    println!("  Size: {} bytes", payload.len());
+    println!("  Sealed: {}", output.display());
+    println!("  Payload hash: {}", hex::encode(sealed));
+    Ok(())
 }

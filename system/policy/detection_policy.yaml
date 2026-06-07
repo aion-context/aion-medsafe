@@ -1,0 +1,57 @@
+# AION-MEDSAFE detection policy.
+#
+# This file is the PLAINTEXT source. It is sealed into a signed `.aion`
+# (`aion-medsafe seal-policy`) before the system will act on it. The signal
+# engine REFUSES to compute if the sealed policy fails verification — it never
+# acts on unsigned or tampered rules. See .claude/rules/agents.md.
+#
+# severity:                0.0 (informational) .. 1.0 (critical)
+# requires_human_review:   no signal escalates without a human (ADR-007)
+# escalation:              who reviews when queued (audit/legal/analyst)
+
+version: "1"
+effective_date: "2026-06-06"
+
+thresholds:
+  # Confidence at or above this queues a signal for human review.
+  minimum_confidence_for_alert: 0.70
+  # Lookback horizon for time-bounded detectors (days).
+  maximum_days_lookback: 3650
+
+jurisdictions:
+  primary: "HI"
+  scope: "national_ingest_local_focus"
+
+risk_signals:
+  re_exclusion:
+    severity: 0.85
+    description: "Excluded, reinstated, then excluded again — persistent problematic behavior."
+    requires_human_review: true
+    escalation: "legal_compliance"
+
+  multi_state_exclusion:
+    severity: 0.70
+    description: "Exclusions recorded in multiple states — possible cross-state evasion."
+    requires_human_review: true
+    escalation: "analyst"
+
+  federal_state_mismatch:
+    severity: 0.55
+    description: "On the federal HHS-OIG LEIE but absent from the state Medicaid exclusion list."
+    requires_human_review: true
+    escalation: "analyst"
+
+  active_npi_while_excluded:
+    severity: 0.90
+    description: "NPI remains active in NPPES while the provider is under active exclusion."
+    requires_human_review: true
+    escalation: "legal_compliance"
+
+  # Defined for completeness but NOT computable until claims/MMIS data is
+  # ingested (PROTECTED class, future gate). The engine reports this signal
+  # type as not-computable rather than fabricating a result.
+  billing_after_exclusion:
+    severity: 1.0
+    description: "Claims submitted after the exclusion effective date. Requires claims data."
+    requires_human_review: true
+    escalation: "legal_compliance"

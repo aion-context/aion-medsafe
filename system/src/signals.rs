@@ -1,42 +1,38 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Risk signal computation — policy-gated.
+//! Risk signal computation — the full sealed chain of custody.
 //!
-//! This module REFUSES to compute signals unless the detection policy
-//! passes full aion-context verification. Every signal generated
-//! carries a reference to the verified policy version that authorized it.
+//! Flow (every link verified or sealed):
+//!   1. Load registry
+//!   2. Verify + load the Trust Graph from its sealed `.aion`
+//!   3. Verify + load the detection policy from its sealed `.aion`
+//!   4. Compute signals over the verified graph (REFUSES on any failure)
+//!   5. Filter by jurisdiction (handled in the detection engine)
+//!   6. Apply the threshold + human-review gate (no autonomous accusation)
+//!   7. Seal the signal output as its own `.aion` (evidence custody)
 
-use aion_context::key_registry::KeyRegistry;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use chrono::Utc;
+
+use crate::detection::{self, ComputedSignal, DetectionReport};
+use crate::graph::TrustGraph;
 use crate::policy::DetectionPolicy;
+use crate::provenance;
 
-/// Run the signal computation pipeline.
-///
-/// Flow:
-/// 1. Load and verify registry
-/// 2. Load and verify detection policy (.aion)
-/// 3. Load Trust Graph export
-/// 4. Compute signals per policy rules
-/// 5. Filter by jurisdiction if specified
-/// 6. Output signals with provenance references
+/// Run the signal computation pipeline and seal the output.
 pub fn run(
     policy_path: &Path,
     graph_path: &Path,
     jurisdiction: Option<&str>,
+    output: Option<&Path>,
 ) -> anyhow::Result<()> {
-    // Step 1: Load registry
-    let registry_path = Path::new(".aion/medsafe.registry.json");
-    if !registry_path.exists() {
-        anyhow::bail!(
-            "Registry not found at {}. Run `aion-medsafe init` first.",
-            registry_path.display()
-        );
-    }
-    let registry_json = std::fs::read_to_string(registry_path)?;
-    let registry = KeyRegistry::from_trusted_json(&registry_json)?;
+    // Step 1: registry
+    let registry = provenance::load_registry(Path::new(provenance::DEFAULT_REGISTRY_PATH))?;
 
-    // Step 2: Load and VERIFY detection policy
-    // This is the critical gate — if policy is tampered, we refuse to act
+    // Step 2: verify + load the Trust Graph (sealed .aion payload)
+    let graph = TrustGraph::load_verified(graph_path, &registry)?;
+
+    // Step 3: verify + load the detection policy (the critical gate)
     let policy = DetectionPolicy::load_verified(policy_path, &registry)?;
 
     tracing::info!(
@@ -46,44 +42,142 @@ pub fn run(
         jurisdiction = jurisdiction.unwrap_or("national"),
     );
 
-    // Step 3: Load Trust Graph
-    if !graph_path.exists() {
-        anyhow::bail!("Trust Graph not found at {}", graph_path.display());
-    }
+    // Step 4-6: compute, jurisdiction filter, threshold + review gate
+    let report = detection::compute(&graph, &policy, jurisdiction);
 
-    // Step 4: Compute signals per policy
-    // (In full implementation, this iterates the graph and applies each
-    // signal definition from the policy)
-    let signal_types: Vec<&str> = policy.risk_signals.keys().map(|s| s.as_str()).collect();
-    tracing::info!(
-        event = "computing_signals",
-        signal_types = ?signal_types,
-        jurisdiction = jurisdiction.unwrap_or("national"),
-        threshold = policy.thresholds.minimum_confidence_for_alert,
-    );
+    // Step 7: seal the signal output as its own .aion
+    let payload = serialize_report(&policy, &report, jurisdiction);
+    let output_path = resolve_output(output, jurisdiction);
+    let signing_key = provenance::load_signing_key()?;
+    let sealed = provenance::seal_payload(
+        &output_path,
+        payload.as_bytes(),
+        &signing_key,
+        &format!(
+            "Signals {} (policy v{})",
+            jurisdiction.unwrap_or("national"),
+            policy.version
+        ),
+    )?;
+
+    print_summary(&policy, &report, jurisdiction, &output_path, &sealed);
+    Ok(())
+}
+
+/// Serialize the run as newline-delimited audit records: one run-meta line
+/// followed by one line per computed signal.
+fn serialize_report(
+    policy: &DetectionPolicy,
+    report: &DetectionReport,
+    jurisdiction: Option<&str>,
+) -> String {
+    let queued = report
+        .signals
+        .iter()
+        .filter(|s| s.reason_code == "signal_queued_review")
+        .count();
+
+    let meta = serde_json::json!({
+        "record": "run_meta",
+        "agent": "provider_risk",
+        "computed_at": Utc::now().to_rfc3339(),
+        "policy_version": policy.version,
+        "jurisdiction": jurisdiction.unwrap_or("national"),
+        "entities_evaluated": report.entities_evaluated,
+        "signal_count": report.signals.len(),
+        "queued_for_review": queued,
+        "below_threshold": report.signals.len() - queued,
+        "not_computable": report.not_computable,
+    });
+
+    let mut out = String::new();
+    out.push_str(&meta.to_string());
+    out.push('\n');
+    for signal in &report.signals {
+        // ComputedSignal is Serialize; serialization cannot fail for this shape.
+        if let Ok(line) = serde_json::to_string(signal) {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn resolve_output(output: Option<&Path>, jurisdiction: Option<&str>) -> PathBuf {
+    match output {
+        Some(p) => p.to_path_buf(),
+        None => {
+            let jur = jurisdiction.unwrap_or("national").to_lowercase();
+            // Second precision so re-runs on the same day don't collide
+            // (init_file refuses to overwrite an existing sealed file).
+            let stamp = Utc::now().format("%Y-%m-%dT%H%M%SZ");
+            Path::new("provenance").join(format!("signals_{jur}_{stamp}.aion"))
+        }
+    }
+}
+
+fn print_summary(
+    policy: &DetectionPolicy,
+    report: &DetectionReport,
+    jurisdiction: Option<&str>,
+    output_path: &Path,
+    sealed: &[u8; 32],
+) {
+    let queued = report
+        .signals
+        .iter()
+        .filter(|s| s.reason_code == "signal_queued_review")
+        .count();
 
     println!(
         "✓ Policy verified: v{} (effective {})",
         policy.version, policy.effective_date
     );
-    println!("  Signal types: {}", signal_types.len());
     println!(
         "  Jurisdiction: {}",
         jurisdiction.unwrap_or(&policy.jurisdictions.primary)
     );
     println!(
-        "  Min confidence: {}",
+        "  Threshold: {}",
         policy.thresholds.minimum_confidence_for_alert
     );
-    println!(
-        "  Lookback: {} days",
-        policy.thresholds.maximum_days_lookback
-    );
+    println!("  Entities evaluated: {}", report.entities_evaluated);
     println!();
-    println!("  Computing signals against Trust Graph...");
+    println!("  Signals generated: {}", report.signals.len());
+    println!("    Queued for human review: {queued}");
+    println!(
+        "    Below threshold (archived): {}",
+        report.signals.len() - queued
+    );
+    if !report.not_computable.is_empty() {
+        println!(
+            "    Not computable (insufficient data): {}",
+            report.not_computable.join(", ")
+        );
+    }
+    print_top_signals(report);
+    println!();
+    println!("  Sealed signal output: {}", output_path.display());
+    println!("  Output manifest hash: {}", hex::encode(sealed));
+}
 
-    // TODO: Implement full graph traversal and signal computation
-    // For now, this proves the policy-gate pattern works
-
-    Ok(())
+/// Print up to five highest-confidence queued signals as a reviewer preview.
+fn print_top_signals(report: &DetectionReport) {
+    let mut queued: Vec<&ComputedSignal> = report
+        .signals
+        .iter()
+        .filter(|s| s.reason_code == "signal_queued_review")
+        .collect();
+    queued.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
+    if queued.is_empty() {
+        return;
+    }
+    println!();
+    println!("  Top signals queued for review:");
+    for signal in queued.iter().take(5) {
+        println!(
+            "    [{:.2}] {} — {} ({})",
+            signal.confidence, signal.signal_type, signal.entity_name, signal.entity_id
+        );
+    }
 }

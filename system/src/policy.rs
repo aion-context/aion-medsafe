@@ -16,12 +16,18 @@ use std::path::Path;
 use crate::error::{MedsafeError, Result};
 
 /// A risk signal definition from the policy file.
+///
+/// `description` and `escalation` are part of the signed policy contract
+/// (surfaced to reviewers / used for routing) but not read by the compute
+/// path; they are retained so the sealed policy round-trips faithfully.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SignalDefinition {
     pub severity: f64,
+    #[allow(dead_code)]
     pub description: String,
     pub requires_human_review: bool,
     #[serde(default)]
+    #[allow(dead_code)]
     pub escalation: Option<String>,
 }
 
@@ -38,12 +44,18 @@ pub struct DetectionPolicy {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Thresholds {
     pub minimum_confidence_for_alert: f64,
+    // Horizon for time-bounded detectors; consumed once date-windowed signals
+    // (e.g. billing_after_exclusion) are wired in.
+    #[allow(dead_code)]
     pub maximum_days_lookback: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Jurisdictions {
     pub primary: String,
+    // Declared ingest scope (e.g. "national_ingest_local_focus"); part of the
+    // signed policy contract, not read by the compute path.
+    #[allow(dead_code)]
     pub scope: String,
 }
 

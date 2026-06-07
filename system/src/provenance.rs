@@ -14,9 +14,11 @@
 use aion_context::crypto::SigningKey;
 use aion_context::key_registry::KeyRegistry;
 use aion_context::manifest::{sign_manifest, ArtifactManifestBuilder};
-use aion_context::operations::{init_file, verify_file, InitOptions};
+use aion_context::operations::{init_file, show_current_rules, verify_file, InitOptions};
 use aion_context::types::AuthorId;
 use std::path::Path;
+
+use crate::error::{MedsafeError, Result};
 
 /// Pipeline automation author ID (range 80001-80009)
 const PIPELINE_AUTHOR: u64 = 80001;
@@ -24,11 +26,191 @@ const PIPELINE_AUTHOR: u64 = 80001;
 /// Default path for the signing key (seed bytes).
 const DEFAULT_KEY_PATH: &str = ".aion/pipeline.key";
 
+/// Default path for the key registry (public keys only — safe to commit).
+pub const DEFAULT_REGISTRY_PATH: &str = ".aion/medsafe.registry.json";
+
 /// Load registry from disk using aion-context's trusted JSON format.
-fn load_registry(registry_path: &Path) -> anyhow::Result<KeyRegistry> {
+pub fn load_registry(registry_path: &Path) -> Result<KeyRegistry> {
+    if !registry_path.exists() {
+        return Err(MedsafeError::RegistryNotFound {
+            path: registry_path.to_path_buf(),
+        });
+    }
     let json = std::fs::read_to_string(registry_path)?;
-    let registry = KeyRegistry::from_trusted_json(&json)?;
+    let registry = KeyRegistry::from_trusted_json(&json).map_err(|e| MedsafeError::ParseError {
+        source_name: registry_path.display().to_string(),
+        reason: e.to_string(),
+    })?;
     Ok(registry)
+}
+
+/// Seal arbitrary bytes into a signed `.aion` file whose payload IS the data.
+///
+/// This is the "sealed payload" pattern used for governance artifacts — the
+/// detection policy, the Trust Graph, and signal output — where the data must
+/// be verifiable in-band (via the four aion-context guarantees) rather than
+/// through a side-car manifest. Contrast with [`seal`], which records only a
+/// metadata manifest for a large external raw file.
+///
+/// Returns the BLAKE3 digest of the payload as proof of what was sealed.
+pub fn seal_payload(
+    output_path: &Path,
+    payload: &[u8],
+    signing_key: &SigningKey,
+    message: &str,
+) -> Result<[u8; 32]> {
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let author = AuthorId::new(PIPELINE_AUTHOR);
+    let options = InitOptions {
+        author_id: author,
+        signing_key,
+        message,
+        timestamp: None,
+    };
+    init_file(output_path, payload, &options)?;
+
+    let digest = blake3::hash(payload);
+    tracing::info!(
+        event = "payload_sealed",
+        file = %output_path.display(),
+        size = payload.len(),
+        blake3 = %digest,
+    );
+    Ok(*digest.as_bytes())
+}
+
+/// Verify a sealed `.aion` (all four guarantees) and return its payload bytes.
+///
+/// This is the verification half of the "policy loop": it REFUSES to return
+/// any data unless the file's structure, integrity hash, hash chain, and
+/// signatures all verify against the registry. Trust is never cached — the
+/// file is re-read and re-verified on every call.
+pub fn load_verified_payload(aion_path: &Path, registry: &KeyRegistry) -> Result<Vec<u8>> {
+    if !aion_path.exists() {
+        return Err(MedsafeError::SourceNotFound {
+            path: aion_path.to_path_buf(),
+        });
+    }
+
+    // Pre-flight bounds check BEFORE handing the file to verify_file. This
+    // defuses an aion-context 1.0 DoS where corrupted header counts/lengths
+    // drive an unbounded allocation that aborts the process. See
+    // preflight_header_bounds for the full rationale.
+    let file_bytes = std::fs::read(aion_path)?;
+    preflight_header_bounds(&file_bytes, aion_path)?;
+
+    let report = verify_file(aion_path, registry).map_err(|e| MedsafeError::ProvenanceFailed {
+        path: aion_path.to_path_buf(),
+        reason: e.to_string(),
+    })?;
+
+    if !report.is_valid {
+        tracing::error!(
+            event = "provenance_verification_failed",
+            file = %aion_path.display(),
+            structure = report.structure_valid,
+            integrity = report.integrity_hash_valid,
+            chain = report.hash_chain_valid,
+            signatures = report.signatures_valid,
+        );
+        return Err(MedsafeError::ProvenanceFailed {
+            path: aion_path.to_path_buf(),
+            reason: format!(
+                "structure={} integrity={} chain={} signatures={}: {:?}",
+                report.structure_valid,
+                report.integrity_hash_valid,
+                report.hash_chain_valid,
+                report.signatures_valid,
+                report.errors,
+            ),
+        });
+    }
+
+    let payload = show_current_rules(aion_path).map_err(|e| MedsafeError::ProvenanceFailed {
+        path: aion_path.to_path_buf(),
+        reason: format!("payload extraction failed: {e}"),
+    })?;
+
+    tracing::info!(
+        event = "payload_verified",
+        file = %aion_path.display(),
+        version_count = report.version_count,
+        size = payload.len(),
+    );
+    Ok(payload)
+}
+
+/// Defuse a known aion-context 1.0 denial-of-service before verification.
+///
+/// `verify_file` reads entry counts and section lengths straight from the file
+/// header and uses them as `Vec::with_capacity` sizes (operations.rs
+/// `collect_versions` / `collect_signatures`). A corrupted header — even a
+/// single flipped byte in a count field — can therefore drive an unbounded
+/// allocation that aborts the process (SIGABRT) instead of returning an error,
+/// turning "tamper → refuse" into "tamper → crash" (a DoS on the verifier).
+///
+/// We pre-validate using aion-context's OWN zero-copy header parser
+/// (`AionParser::new` parses only the fixed-size header — no count-driven
+/// allocation), so this is not hand-rolled `.aion` parsing. We refuse any
+/// header whose sections fall outside the file or whose entry counts exceed the
+/// file length (each on-disk entry is at least one byte). This bounds the
+/// worst-case allocation to the file size rather than `u64::MAX`, converting the
+/// abort into a clean `Err`.
+fn preflight_header_bounds(file_bytes: &[u8], path: &Path) -> Result<()> {
+    use aion_context::parser::AionParser;
+
+    let parser = AionParser::new(file_bytes).map_err(|e| MedsafeError::ProvenanceFailed {
+        path: path.to_path_buf(),
+        reason: format!("header parse failed: {e}"),
+    })?;
+    let header = parser.header();
+    let file_len = file_bytes.len() as u64;
+
+    let refuse = |reason: String| -> Result<()> {
+        tracing::error!(event = "provenance_preflight_refused", file = %path.display(), reason = %reason);
+        Err(MedsafeError::ProvenanceFailed {
+            path: path.to_path_buf(),
+            reason,
+        })
+    };
+
+    let sections = [
+        (
+            "encrypted_rules",
+            header.encrypted_rules_offset,
+            header.encrypted_rules_length,
+        ),
+        (
+            "string_table",
+            header.string_table_offset,
+            header.string_table_length,
+        ),
+    ];
+    for (name, offset, length) in sections {
+        if offset > file_len || length > file_len || offset.saturating_add(length) > file_len {
+            return refuse(format!(
+                "section {name} out of bounds (offset {offset}, length {length}, file {file_len})"
+            ));
+        }
+    }
+
+    let counts = [
+        ("version_chain", header.version_chain_count),
+        ("signatures", header.signatures_count),
+        ("audit_trail", header.audit_trail_count),
+    ];
+    for (name, count) in counts {
+        if count > file_len {
+            return refuse(format!(
+                "{name}_count {count} exceeds file length {file_len} — refusing to allocate"
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Load the pipeline signing key from disk.
@@ -191,4 +373,68 @@ pub fn show(manifest_path: &Path) -> anyhow::Result<()> {
     println!("  Signatures: {}", report.signatures_valid);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aion_context::types::AuthorId;
+    use proptest::prelude::*;
+
+    fn registry_and_key() -> (KeyRegistry, SigningKey) {
+        let key = SigningKey::generate();
+        let mut registry = KeyRegistry::new();
+        registry
+            .register_author(
+                AuthorId::new(PIPELINE_AUTHOR),
+                key.verifying_key(),
+                key.verifying_key(),
+                0,
+            )
+            .expect("register author");
+        (registry, key)
+    }
+
+    #[test]
+    fn seal_payload_load_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("p.aion");
+        let (registry, key) = registry_and_key();
+        let payload = b"version: 1\nrules: yes\n";
+
+        seal_payload(&path, payload, &key, "seal").expect("seal");
+        let loaded = load_verified_payload(&path, &registry).expect("load");
+        assert_eq!(loaded, payload);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(400))]
+
+        /// The guarded loader must NEVER abort and must refuse ANY single-byte
+        /// corruption of a sealed file — this is the regression test for the
+        /// aion-context unbounded-allocation DoS (see preflight_header_bounds).
+        #[test]
+        fn guarded_loader_refuses_any_single_byte_tamper(
+            payload in prop::collection::vec(any::<u8>(), 16..4_000),
+            flip_pct in 0.0f64..1.0,
+        ) {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("p.aion");
+            let (registry, key) = registry_and_key();
+            seal_payload(&path, &payload, &key, "seal").expect("seal");
+
+            // Sanity: the untouched file loads and round-trips.
+            prop_assert_eq!(load_verified_payload(&path, &registry).expect("load clean"), payload.clone());
+
+            // Flip one byte anywhere in the sealed file.
+            let mut bytes = std::fs::read(&path).expect("read");
+            let offset = ((flip_pct * (bytes.len() - 1) as f64) as usize).min(bytes.len() - 1);
+            bytes[offset] ^= 0x01;
+            std::fs::write(&path, &bytes).expect("write");
+
+            // Must return Err (refuse) — and crucially must not abort the process.
+            prop_assert!(load_verified_payload(&path, &registry).is_err(),
+                "tamper at offset {} was not refused", offset);
+        }
+    }
 }

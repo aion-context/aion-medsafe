@@ -12,7 +12,6 @@ use aion_context::operations::{
 };
 use aion_context::types::AuthorId;
 use proptest::prelude::*;
-use std::path::Path;
 
 /// Helper: create a registry and key pair for testing.
 fn test_registry() -> (KeyRegistry, SigningKey, AuthorId) {
@@ -72,9 +71,23 @@ proptest! {
 // PROPERTY: Single-Byte Tamper Detection
 // For ANY sealed file, flipping ANY single byte → verify = INVALID
 // ============================================================================
+//
+// IGNORED: this exercises `aion_context::verify_file` DIRECTLY, which has an
+// unbounded-allocation DoS — a flipped byte in a header count/length field
+// drives `Vec::with_capacity(count)` (operations.rs `collect_versions` /
+// `collect_signatures`) and aborts the process (SIGABRT) instead of returning
+// `Err`. No fixed aion-context release exists (crates.io has only 1.0.0).
+//
+// Our system never calls `verify_file` unguarded: `provenance::load_verified_payload`
+// runs `preflight_header_bounds` (using aion-context's own zero-copy header
+// parser) to refuse implausible headers first. That mitigation is covered by
+// `provenance::tests::guarded_loader_refuses_any_single_byte_tamper`, which IS
+// the property we actually rely on. Re-enable this raw test if aion-context
+// ships a bounded-allocation fix.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(300))]
 
+    #[ignore = "aion-context 1.0 verify_file aborts on corrupted header counts; mitigated + covered by provenance::tests::guarded_loader_refuses_any_single_byte_tamper"]
     #[test]
     fn prop_single_byte_flip_always_detected(
         payload in prop::collection::vec(any::<u8>(), 100..5_000),
