@@ -1,0 +1,37 @@
+name: Mutation testing
+
+# adversarial-testing.md mandates mutation testing, but it is slow (it compiles
+# and runs the suite against many mutants), so it runs weekly + on demand rather
+# than on every push. Surviving mutants = tests that don't actually catch bugs.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  mutants:
+    name: cargo-mutants (system)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: system
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: system
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+      - name: Run mutation testing
+        run: cargo mutants --timeout 90
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report
+          path: system/mutants.out/

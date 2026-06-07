@@ -1,5 +1,7 @@
 # AION-MEDSAFE
 
+[![CI](https://github.com/aion-context/aion-medsafe/actions/workflows/ci.yml/badge.svg)](https://github.com/aion-context/aion-medsafe/actions/workflows/ci.yml)
+
 Agentic evidence and compliance platform for Medicaid integrity teams —
 an evidence-ranking and compliance-assistance system with cryptographic
 provenance via `aion-context`. It helps investigators find fraud patterns
