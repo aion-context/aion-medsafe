@@ -53,6 +53,12 @@ risk_signals:
     requires_human_review: true
     escalation: "legal_compliance"
 
+  shared_practice_location:
+    severity: 0.75
+    description: "Excluded provider shares a practice address or phone with other excluded providers — possible shell clinic / ownership network."
+    requires_human_review: true
+    escalation: "analyst"
+
   # Defined for completeness but NOT computable until claims/MMIS data is
   # ingested (PROTECTED class, future gate). The engine reports this signal
   # type as not-computable rather than fabricating a result.

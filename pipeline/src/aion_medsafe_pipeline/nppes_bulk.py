@@ -24,6 +24,10 @@ import pathlib
 import re
 import sys
 import zipfile
+
+_NON_ALNUM = re.compile(r"[^A-Z0-9 ]")
+_SPACES = re.compile(r"\s+")
+_NON_DIGIT = re.compile(r"\D")
 from datetime import UTC, datetime
 from typing import Any
 from urllib.request import Request, urlopen
@@ -41,7 +45,11 @@ FIELD_INDICES = {
     "org_name": 4,
     "last_name": 5,
     "first_name": 6,
+    "address_line1": 28,
+    "city": 30,
     "practice_state": 31,
+    "postal": 32,
+    "phone": 34,
     "enumeration_date": 36,
     "last_update": 37,
     "deactivation_reason": 38,
@@ -147,6 +155,21 @@ def _status(deactivation_date: str, reactivation_date: str) -> str:
     return "DEACTIVATED" if deactivation_date else "ACTIVE"
 
 
+def _norm_address(line1: str, city: str, state: str, postal: str) -> str | None:
+    """Canonical practice address for co-location matching: alphanumerics +
+    spaces, uppercased, 5-digit ZIP."""
+    parts = [line1, city, state, postal[:5]]
+    joined = " ".join(p.strip() for p in parts if p and p.strip())
+    cleaned = _SPACES.sub(" ", _NON_ALNUM.sub(" ", joined.upper())).strip()
+    return cleaned or None
+
+
+def _norm_phone(raw: str) -> str | None:
+    """Last 10 digits of a phone number, or None."""
+    digits = _NON_DIGIT.sub("", raw or "")
+    return digits[-10:] if len(digits) >= 10 else None
+
+
 def _normalize_row(row: list[str], snapshot_hash: str, observed_at: str) -> dict[str, Any] | None:
     if len(row) < 50:
         return None
@@ -168,6 +191,13 @@ def _normalize_row(row: list[str], snapshot_hash: str, observed_at: str) -> dict
         "entity_type": int(entity_type) if entity_type.isdigit() else 1,
         "name": name or None,
         "state": row[FIELD_INDICES["practice_state"]].strip() or None,
+        "address": _norm_address(
+            row[FIELD_INDICES["address_line1"]],
+            row[FIELD_INDICES["city"]],
+            row[FIELD_INDICES["practice_state"]],
+            row[FIELD_INDICES["postal"]],
+        ),
+        "phone": _norm_phone(row[FIELD_INDICES["phone"]]),
         "enumeration_date": row[FIELD_INDICES["enumeration_date"]].strip() or None,
         "last_update": row[FIELD_INDICES["last_update"]].strip() or None,
         "deactivation_reason": row[FIELD_INDICES["deactivation_reason"]].strip() or None,

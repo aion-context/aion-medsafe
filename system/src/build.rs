@@ -230,10 +230,13 @@ fn load_records(dir: &Path) -> anyhow::Result<Vec<NormalizedExclusion>> {
     Ok(records)
 }
 
-/// NPPES status for one NPI: active flag + (raw) deactivation date if any.
+/// NPPES status for one NPI: active flag, deactivation date, and practice
+/// address/phone (for co-location network detection).
 struct NppesInfo {
     active: bool,
     deactivation_date: Option<String>,
+    address: Option<String>,
+    phone: Option<String>,
 }
 
 /// Map NPI -> status info, from the normalized NPPES bulk table, keeping only
@@ -249,6 +252,10 @@ fn load_nppes(path: &Path, wanted: &BTreeSet<&str>) -> anyhow::Result<BTreeMap<S
         status: String,
         #[serde(default)]
         deactivation_date: Option<String>,
+        #[serde(default)]
+        address: Option<String>,
+        #[serde(default)]
+        phone: Option<String>,
     }
 
     let mut map = BTreeMap::new();
@@ -268,6 +275,8 @@ fn load_nppes(path: &Path, wanted: &BTreeSet<&str>) -> anyhow::Result<BTreeMap<S
                 NppesInfo {
                     active: row.status == "ACTIVE",
                     deactivation_date: row.deactivation_date,
+                    address: row.address,
+                    phone: row.phone,
                 },
             );
         }
@@ -361,6 +370,8 @@ fn build_entity(
 
     let mut npi_active: Option<bool> = None;
     let mut npi_deactivation_date: Option<String> = None;
+    let mut practice_address: Option<String> = None;
+    let mut practice_phone: Option<String> = None;
     for npi in &member_npis {
         if let Some(info) = nppes.get(npi) {
             npi_active = Some(npi_active.unwrap_or(false) || info.active);
@@ -372,6 +383,13 @@ fn build_entity(
                 {
                     npi_deactivation_date = Some(rfc);
                 }
+            }
+            // First non-empty practice address/phone across the entity's NPIs.
+            if practice_address.is_none() {
+                practice_address = info.address.clone().filter(|s| !s.is_empty());
+            }
+            if practice_phone.is_none() {
+                practice_phone = info.phone.clone().filter(|s| !s.is_empty());
             }
         }
     }
@@ -385,6 +403,8 @@ fn build_entity(
         npis: member_npis.into_iter().collect(),
         npi_active,
         npi_deactivation_date,
+        practice_address,
+        practice_phone,
         resolution_confidence: if has_npi || members.len() == 1 {
             1.0
         } else {

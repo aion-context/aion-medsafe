@@ -9,6 +9,7 @@
 //! support (e.g. `billing_after_exclusion`, which needs claims data) are
 //! reported as not-computable rather than fabricated.
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 
@@ -30,6 +31,7 @@ const COMPUTABLE: &[&str] = &[
     "federal_state_mismatch",
     "active_npi_while_excluded",
     "npi_deactivation_after_exclusion",
+    "shared_practice_location",
 ];
 
 /// A computed risk signal. NOT an accusation — an evidence-ranked indicator
@@ -139,6 +141,7 @@ pub fn compute(
     let jur = jurisdiction.map(str::to_uppercase);
     let threshold = policy.thresholds.minimum_confidence_for_alert;
     let mut report = DetectionReport::default();
+    let mut evaluated: Vec<&Entity> = Vec::new();
 
     for entity in &graph.entities {
         let events = graph.events_for(&entity.entity_id);
@@ -148,11 +151,27 @@ pub fn compute(
             }
         }
         report.entities_evaluated += 1;
+        evaluated.push(entity);
 
         for (stype, hit) in run_detectors(entity, events, policy, jur.is_some()) {
             report
                 .signals
                 .push(dress(policy, entity, stype, hit, threshold, &jur));
+        }
+    }
+
+    // Cross-entity pass: providers sharing a practice address/phone (the
+    // Provider Trust Graph "shell/ownership network" signal).
+    if policy.has_signal("shared_practice_location") {
+        for (entity, hit) in location_signals(&evaluated) {
+            report.signals.push(dress(
+                policy,
+                entity,
+                "shared_practice_location",
+                hit,
+                threshold,
+                &jur,
+            ));
         }
     }
 
@@ -171,6 +190,77 @@ pub fn compute(
         not_computable = ?report.not_computable,
     );
     report
+}
+
+/// Co-location network: providers sharing a normalized practice address or
+/// phone. Returns one hit per entity that shares with ≥1 other — evidence is the
+/// co-located entity ids. Phone sharing scores higher than address sharing (a
+/// shared phone is a stronger same-operator link than a shared building).
+fn location_signals<'a>(entities: &[&'a Entity]) -> Vec<(&'a Entity, Hit)> {
+    let mut by_addr: BTreeMap<&str, Vec<&'a Entity>> = BTreeMap::new();
+    let mut by_phone: BTreeMap<&str, Vec<&'a Entity>> = BTreeMap::new();
+    for &e in entities {
+        if let Some(a) = e.practice_address.as_deref().filter(|s| !s.is_empty()) {
+            by_addr.entry(a).or_default().push(e);
+        }
+        if let Some(p) = e.practice_phone.as_deref().filter(|s| !s.is_empty()) {
+            by_phone.entry(p).or_default().push(e);
+        }
+    }
+
+    let mut out = Vec::new();
+    for &e in entities {
+        let mut co: BTreeSet<&str> = BTreeSet::new();
+        let mut shared_addr: Option<&str> = None;
+        let mut shared_phone: Option<&str> = None;
+
+        if let Some(a) = e.practice_address.as_deref().filter(|s| !s.is_empty()) {
+            if let Some(group) = by_addr.get(a).filter(|g| g.len() >= 2) {
+                shared_addr = Some(a);
+                co.extend(
+                    group
+                        .iter()
+                        .map(|m| m.entity_id.as_str())
+                        .filter(|id| *id != e.entity_id),
+                );
+            }
+        }
+        if let Some(p) = e.practice_phone.as_deref().filter(|s| !s.is_empty()) {
+            if let Some(group) = by_phone.get(p).filter(|g| g.len() >= 2) {
+                shared_phone = Some(p);
+                co.extend(
+                    group
+                        .iter()
+                        .map(|m| m.entity_id.as_str())
+                        .filter(|id| *id != e.entity_id),
+                );
+            }
+        }
+        if co.is_empty() {
+            continue;
+        }
+
+        let cluster_size = co.len() + 1;
+        let mut confidence = 0.55 + 0.10 * (cluster_size as f64 - 1.0);
+        if shared_phone.is_some() {
+            confidence += 0.10; // phone is a stronger same-operator link
+        }
+        let mut what = Vec::new();
+        if let Some(a) = shared_addr {
+            what.push(format!("address \"{a}\""));
+        }
+        if let Some(p) = shared_phone {
+            what.push(format!("phone {p}"));
+        }
+        let description = format!(
+            "shares {} with {} other excluded provider(s) — possible shell/ownership network",
+            what.join(" and "),
+            co.len()
+        );
+        let evidence = co.iter().map(|s| s.to_string()).collect();
+        out.push((e, (confidence.min(0.97), description, evidence)));
+    }
+    out
 }
 
 /// Run every policy-enabled detector for one entity.
@@ -426,6 +516,7 @@ risk_signals:
   federal_state_mismatch: {severity: 0.55, description: "x", requires_human_review: true}
   active_npi_while_excluded: {severity: 0.90, description: "x", requires_human_review: true}
   npi_deactivation_after_exclusion: {severity: 0.80, description: "x", requires_human_review: true}
+  shared_practice_location: {severity: 0.75, description: "x", requires_human_review: true}
   billing_after_exclusion: {severity: 1.0, description: "x", requires_human_review: true}
 "#;
 
@@ -463,6 +554,53 @@ risk_signals:
 
     fn find<'a>(r: &'a DetectionReport, kind: &str) -> Option<&'a ComputedSignal> {
         r.signals.iter().find(|s| s.signal_type == kind)
+    }
+
+    fn entity_loc(id: &str, addr: &str, phone: &str) -> String {
+        format!(
+            r#"{{"kind":"entity","entity_id":"{id}","entity_type":"individual","canonical_name":"{id}","canonical_state":"HI","practice_address":"{addr}","practice_phone":"{phone}"}}"#
+        )
+    }
+
+    #[test]
+    fn shared_practice_location_clusters_co_located_providers() {
+        // Three excluded providers at one address + phone -> network signal.
+        let g = graph(&[
+            &entity_loc("E1", "100 MAIN ST HONOLULU HI 96801", "8085551212"),
+            &entity_loc("E2", "100 MAIN ST HONOLULU HI 96801", "8085551212"),
+            &entity_loc("E3", "100 MAIN ST HONOLULU HI 96801", "8085551212"),
+            &entity_loc("E4", "999 ELSEWHERE AVE HILO HI 96720", "8083334444"),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+            &excl("b", "E2", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+            &excl("c", "E3", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+            &excl("d", "E4", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        let e1 = r
+            .signals
+            .iter()
+            .find(|s| s.signal_type == "shared_practice_location" && s.entity_id == "E1")
+            .expect("E1 fires shared_practice_location");
+        assert_eq!(e1.evidence.len(), 2); // E2 and E3
+        assert!(e1.confidence >= 0.75); // 3-cluster + shared phone
+                                        // The lone provider E4 must NOT fire.
+        assert!(!r
+            .signals
+            .iter()
+            .any(|s| s.signal_type == "shared_practice_location" && s.entity_id == "E4"));
+    }
+
+    #[test]
+    fn solo_address_does_not_cluster() {
+        let g = graph(&[
+            &entity_loc("E1", "1 SOLO RD HONOLULU HI 96801", "8081110000"),
+            &excl("a", "E1", "hhs_oig", "HI", "2020-01-01T00:00:00Z"),
+        ]);
+        let r = compute(&g, &policy(), Some("HI"));
+        assert!(!r
+            .signals
+            .iter()
+            .any(|s| s.signal_type == "shared_practice_location"));
     }
 
     #[test]

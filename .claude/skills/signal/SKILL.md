@@ -62,6 +62,7 @@ The run-meta line carries counts: `signal_count`, `queued_for_review`,
 - `federal_state_mismatch` — On federal LEIE but absent from the state list
 - `active_npi_while_excluded` — Excluded but NPI active in NPPES
 - `npi_deactivation_after_exclusion` — NPI deactivated *after* exclusion (possible attempt to disappear)
+- `shared_practice_location` — Excluded providers sharing a practice address/phone (shell clinic / ownership network)
 - `billing_after_exclusion` — Needs claims data (reported not-computable until ingested)
 
 ## The identity review queue

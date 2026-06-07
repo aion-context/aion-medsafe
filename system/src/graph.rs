@@ -86,6 +86,12 @@ pub struct Entity {
     /// is deactivated in NPPES. `None` = no deactivation on record.
     #[serde(default)]
     pub npi_deactivation_date: Option<String>,
+    /// Normalized NPPES practice address (for co-location network detection).
+    #[serde(default)]
+    pub practice_address: Option<String>,
+    /// Normalized NPPES practice phone (last 10 digits).
+    #[serde(default)]
+    pub practice_phone: Option<String>,
     // resolution_confidence is carried from entity resolution for display/audit;
     // not yet read by the detectors.
     #[allow(dead_code)]
