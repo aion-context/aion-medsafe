@@ -226,5 +226,29 @@ def sam_exclusions_command(
     )
 
 
+@app.command(name="cms-owners")
+def cms_owners_command(
+    data_dir: pathlib.Path = typer.Option(
+        pathlib.Path("data"), "--data", "-d", help="Pipeline data directory."
+    ),
+    limit: int = typer.Option(None, "--limit", "-l", help="Cap rows per provider type."),
+) -> None:
+    """Download the six CMS PECOS "All Owners" bulk files (data.cms.gov, no
+    account) and normalize every (provider, owner) ownership edge into one NDJSON.
+
+    Powers the Rust `owners` correlation: excluded parties owning active Medicare
+    providers. Seal each raw CSV afterwards with `aion-medsafe ingest`.
+    """
+    from aion_medsafe_pipeline import cms_owners
+
+    console.print("[bold]Downloading CMS PECOS All-Owners files...[/bold]")
+    result = cms_owners.run(data_dir, limit=limit)
+    console.print("[bold]Normalized ownership edges:[/bold]")
+    for ptype, n in sorted(result["per_type"].items()):
+        console.print(f"  {ptype}: {n:,}")
+    console.print(f"  total: {result['total']:,}")
+    console.print(f"  Saved: {result['out']}")
+
+
 if __name__ == "__main__":
     app()
