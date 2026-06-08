@@ -9,7 +9,18 @@ faster without replacing human judgment; it never accuses autonomously.
 
 - `pipeline/` — Python ingestion, normalization, and entity resolution ([details](pipeline/README.md))
 - `system/` — Rust provenance, trust graph, and policy-gated signals
+- `docs/` — [documentation index](docs/README.md), incl. the open
+  [Sealed Evidence Packet spec](docs/spec/sealed-evidence-packet.md)
 - `.claude/` — Claude Code project configuration
+
+## Documentation
+
+- **Spec:** [Sealed Evidence Packet (SEP/0.1)](docs/spec/sealed-evidence-packet.md)
+  — the open, verifiable evidence format.
+- **Pilot materials:** [one-pager](docs/med-quest-mfcu-onepager.md) ·
+  [brief](docs/med-quest-mfcu-brief.md) ·
+  [technical appendix](docs/med-quest-mfcu-tech-appendix.md).
+- Full index: [`docs/README.md`](docs/README.md).
 
 ## Development setup
 
@@ -24,3 +35,22 @@ not committed):
 This enables the pre-commit gate (`scripts/hooks/pre-commit`): `cargo clippy
 -- -D warnings` + `cargo fmt --check` on staged Rust, `py_compile` on staged
 Python, and a secret scan. Commits are blocked if any check fails.
+
+## Contributing & security
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, the quality gate, the
+  no-real-PII rule, and DCO sign-off.
+- [`SECURITY.md`](SECURITY.md) — private vulnerability reporting (do **not** open
+  public issues for security).
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — Contributor Covenant.
+
+## License
+
+Dual-licensed under either of:
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT))
+
+at your option. The Sealed Evidence Packet specification (`docs/spec/`) is
+published under Apache-2.0 to encourage independent implementations. Unless you
+state otherwise, any contribution you submit is dual-licensed as above.
