@@ -45,13 +45,12 @@ outreach steps, or **(repo)** for in-tree work.
 - [x] **(maintainer)** Private vulnerability reporting enabled (complements
       `SECURITY.md`).
 
-## Phase 4 — Release `v0.1.0`
+## Phase 4 — Release `v0.1.0` ✓
 
-- [ ] **(maintainer)** Create the GitHub Release from the tag, with notes
-      (capabilities, the eight signals, the SEP spec, "prototype" framing).
-- [ ] **(repo/maintainer)** Build the release binary and run `make release` to
-      produce the SLSA-style attestation; attach the binary + attestation `.aion`
-      + the public-key registry as **release assets** so the build is verifiable.
+- [x] **(maintainer)** Published GitHub Release `v0.1.0` (notes from
+      `docs/release-notes-v0.1.0.md`).
+- [x] **(repo/maintainer)** `make release` SLSA attestation + binary + public-key
+      registry attached as verifiable assets.
 - [ ] **(repo)** Verify the README quick start works from a clean clone on
       synthetic fixtures.
 
