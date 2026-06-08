@@ -11,9 +11,10 @@
 - [Med-QUEST / MFCU positioning brief](med-quest-mfcu-brief.md)
 - [Technical & security appendix](med-quest-mfcu-tech-appendix.md) — for IT/CISO review
 
-## Strategy (internal)
+## Strategy (internal — remove or sanitize before going public)
 
 - [Go-to-market & open-source strategy](go-to-market.md) — *internal; not for distribution*
+- [Public-launch checklist](launch-checklist.md) — *internal working checklist*
 
 ## Engineering
 
