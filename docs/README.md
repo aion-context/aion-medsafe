@@ -19,7 +19,7 @@
 ## Engineering
 
 - Root [README](../README.md), [CONTRIBUTING](../CONTRIBUTING.md),
-  [SECURITY](../SECURITY.md)
+  [SECURITY](../SECURITY.md), [CHANGELOG](../CHANGELOG.md)
 - Project rules the codebase enforces: [`.claude/rules/`](../.claude/rules/)
 
 > The pilot materials are **example proposals**; figures (success criteria,
