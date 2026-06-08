@@ -34,7 +34,7 @@ Each area of the codebase activates the relevant expert persona's constraints an
 - Every signal needs policy authorization
 - Evidence must be sealed before reference
 - All escalations require human approval (K-of-N multisig for high-severity)
-**References:** prd0.md, agents.md, 42 CFR Part 455
+**References:** agents.md, 42 CFR Part 455
 
 ### 🦀 Rust Systems Engineer
 **Activates when:** Editing `system/src/*.rs`, `Cargo.toml`

@@ -19,7 +19,6 @@
 
 - Root [README](../README.md), [CONTRIBUTING](../CONTRIBUTING.md),
   [SECURITY](../SECURITY.md)
-- Product requirements: [`prd0.md`](../prd0.md)
 - Project rules the codebase enforces: [`.claude/rules/`](../.claude/rules/)
 
 > The pilot materials are **drafts** — set the placeholder figures (success

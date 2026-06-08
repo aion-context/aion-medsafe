@@ -13,7 +13,7 @@ aion-medsafe/
 ├── pipeline/         Python — bulk data ingestion, normalization, entity resolution
 ├── system/           Rust — cryptographic provenance, trust graph, policy-gated signals
 ├── .claude/          Claude Code configuration (this folder)
-└── prd0.md           Product requirements document
+└── docs/             Specification, pilot materials, and strategy
 ```
 
 ### Pipeline (Python) — acquisition + normalization only
