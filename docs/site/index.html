@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AION-MEDSAFE — verifiable evidence for Medicaid integrity</title>
+  <meta name="description" content="Turn investigative leads into court-defensible, independently verifiable evidence. An open-source, chain-of-custody system for Medicaid provider integrity — sealed, signed, and checkable by anyone. Never accuses on its own.">
+  <meta name="theme-color" content="#f5f1e8">
+  <link rel="canonical" href="https://aion-context.github.io/aion-medsafe/site/">
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="AION-MEDSAFE — verifiable evidence for Medicaid integrity">
+  <meta property="og:description" content="Turn investigative leads into court-defensible, independently verifiable evidence. Open-source, sealed chain of custody. Leads for human review — not accusations.">
+  <meta property="og:url" content="https://aion-context.github.io/aion-medsafe/site/">
+  <meta property="og:image" content="og.svg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="AION-MEDSAFE — verifiable evidence for Medicaid integrity">
+  <meta name="twitter:description" content="Open-source, sealed chain of custody for Medicaid provider integrity. Leads for human review — not accusations.">
+  <meta name="twitter:image" content="og.svg">
+
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="site-head">
+    <a class="brand" href="#top" aria-label="AION-MEDSAFE home">
+      <span class="seal-mark" aria-hidden="true"></span>
+      <span class="brand-word">AION&#8209;MEDSAFE</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#how">How it works</a>
+      <a href="#standard">The standard</a>
+      <a href="#limits">Limits</a>
+      <a href="#pilot">Pilot</a>
+      <a class="nav-repo" href="https://github.com/aion-context/aion-medsafe">GitHub&#8201;&#8599;</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <span id="top"></span>
+
+    <!-- HERO -->
+    <section class="hero" aria-labelledby="hero-h">
+      <div class="hero-copy reveal">
+        <p class="kicker">Open-source &middot; chain of custody &middot; human-reviewed</p>
+        <h1 id="hero-h">Turn leads into evidence that holds up.</h1>
+        <p class="lede">
+          AION-MEDSAFE assembles the public federal and state adverse-action record,
+          ranks cross-corroborated provider-integrity leads for human review, and
+          produces a <strong>sealed, independently verifiable</strong> case file.
+          It never accuses on its own.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-seal" href="https://github.com/aion-context/aion-medsafe/blob/main/docs/spec/sealed-evidence-packet.md">Read the SEP&nbsp;spec</a>
+          <a class="btn btn-quiet" href="#how">See how it works</a>
+        </div>
+        <p class="hero-foot">Public data only. No claims, no PHI. Outputs are investigative leads, not findings.</p>
+      </div>
+
+      <!-- Signature moment: a real sealed packet you can verify -->
+      <figure class="packet reveal" aria-labelledby="packet-cap">
+        <div class="packet-doc" id="packet">
+          <header class="packet-head">
+            <span class="packet-type">CASE PACKET</span>
+            <span class="packet-id">e4ccae1ab854d129</span>
+          </header>
+          <dl class="packet-fields">
+            <div><dt>Subject</dt><dd>YANG SUNG S. &middot; NPI 1043470370</dd></div>
+            <div><dt>Federal lists</dt><dd>HHS-OIG (LEIE), SAM.gov</dd></div>
+            <div><dt>State Medicaid</dt><dd>listed</dd></div>
+            <div><dt>Signal</dt><dd>active NPI while excluded &middot; 0.85</dd></div>
+            <div><dt>Source hash</dt><dd class="mono hash">9aee29ee…f72acb6</dd></div>
+          </dl>
+          <ul class="guarantees" aria-label="Verification guarantees">
+            <li data-g><span class="g-name">Structure</span><span class="g-state">pending</span></li>
+            <li data-g><span class="g-name">Integrity</span><span class="g-state">pending</span></li>
+            <li data-g><span class="g-name">Hash&nbsp;chain</span><span class="g-state">pending</span></li>
+            <li data-g><span class="g-name">Signatures</span><span class="g-state">pending</span></li>
+          </ul>
+          <div class="packet-action">
+            <button type="button" id="verify-btn" class="btn btn-seal btn-sm">Verify this packet</button>
+            <span class="stamp" id="stamp" aria-hidden="true">VERIFIED</span>
+          </div>
+        </div>
+        <figcaption id="packet-cap">A sealed evidence packet — checkable offline against the public key registry.</figcaption>
+      </figure>
+    </section>
+
+    <!-- PROBLEM -->
+    <section class="band problem" aria-labelledby="prob-h">
+      <div class="measure reveal">
+        <p class="section-tag">The problem</p>
+        <h2 id="prob-h">The signals already exist. The evidence doesn't survive scrutiny.</h2>
+        <p>
+          An excluded provider still billing. A clinic reconstituted under new NPIs.
+          A barred owner behind an active facility. The data is real — but it lives in
+          mismatched federal and state files with no shared identifiers. Assembling it
+          by hand is slow, and the result is a spreadsheet that won't survive a defense
+          challenge or an audit.
+        </p>
+        <p class="aside">
+          Tools that &ldquo;score&rdquo; providers with opaque models are indefensible
+          in a due-process setting. The missing piece was never more data — it was a way
+          to assemble it <em>defensibly</em>.
+        </p>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="band" id="how" aria-labelledby="how-h">
+      <div class="measure">
+        <p class="section-tag">How it works</p>
+        <h2 id="how-h">One chain of custody, end to end.</h2>
+      </div>
+      <ol class="ledger" aria-label="Provenance chain">
+        <li class="reveal"><span class="step-no">01</span>
+          <div class="step-body">
+            <h3>Ingest public bulk data</h3>
+            <p>Seven government sources, downloaded in bulk — no accounts. Each raw file is hashed before any transformation.</p>
+          </div>
+        </li>
+        <li class="reveal"><span class="step-no">02</span>
+          <div class="step-body">
+            <h3>Seal at the source</h3>
+            <p>Every file is sealed with a BLAKE3 hash + Ed25519 signature. Nothing is acted on until it verifies.</p>
+          </div>
+        </li>
+        <li class="reveal"><span class="step-no">03</span>
+          <div class="step-body">
+            <h3>Resolve &amp; detect</h3>
+            <p>Providers are resolved across sources; eight evidence-ranked signals run under a signed, policy-gated engine.</p>
+          </div>
+        </li>
+        <li class="reveal"><span class="step-no">04</span>
+          <div class="step-body">
+            <h3>Human review</h3>
+            <p>Nothing escalates on its own. A named analyst confirms or rejects — and that decision is itself signed.</p>
+          </div>
+        </li>
+        <li class="reveal"><span class="step-no">05</span>
+          <div class="step-body">
+            <h3>Verifiable case packet</h3>
+            <p>The output is a sealed dossier: identity, signals, evidence with source hashes, and an attestation anyone can re-check.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- PROOF -->
+    <section class="band proof" aria-labelledby="proof-h">
+      <div class="measure reveal">
+        <p class="section-tag">By the numbers</p>
+        <h2 id="proof-h">Running today, on real public data.</h2>
+      </div>
+      <div class="figures">
+        <p class="reveal"><span class="fig">7</span> public bulk sources, no account required — LEIE, NPPES, SAM.gov, CMS PECOS ownership, Hawaii Med-QUEST &amp; DCCA.</p>
+        <p class="reveal"><span class="fig">9.55<span class="fig-unit">M</span></span> national NPI records resolved, alongside 790,976 Medicare ownership relationships.</p>
+        <p class="reveal"><span class="fig">8</span> detection signals — evidence-ranked, policy-gated, and queued for human review.</p>
+        <p class="reveal"><span class="fig">4</span> verification guarantees re-checked on every use: structure, integrity, hash-chain, signatures.</p>
+      </div>
+    </section>
+
+    <!-- STANDARD -->
+    <section class="band standard" id="standard" aria-labelledby="std-h">
+      <div class="measure reveal">
+        <p class="section-tag">The open standard</p>
+        <h2 id="std-h">Sealed Evidence Packet (SEP)</h2>
+        <p>
+          The core contribution is an open, vendor-neutral format for tamper-evident,
+          independently verifiable evidence — so any tool can produce it and any
+          reviewer can check it. Two conformance levels: <strong>L1</strong> (sealed)
+          and <strong>L2</strong> (every evidence digest and the policy/graph
+          attestation resolve). L2 is the bar for hearing-grade evidence.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-seal" href="https://github.com/aion-context/aion-medsafe/blob/main/docs/spec/sealed-evidence-packet.md">Read SEP&nbsp;0.1</a>
+          <a class="btn btn-quiet" href="https://github.com/aion-context/aion-medsafe">View the code</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIMITS (credibility) -->
+    <section class="band limits" id="limits" aria-labelledby="lim-h">
+      <div class="measure reveal">
+        <p class="section-tag">What it does not do</p>
+        <h2 id="lim-h">Stated plainly, because trust is the point.</h2>
+        <ul class="plain-list">
+          <li><strong>No claims analysis.</strong> The dollar-value billing signals need claims/MMIS data, which is PHI and behind a deliberate gate. Today's outputs are provider-integrity leads, not billing findings.</li>
+          <li><strong>Some matches are name-only.</strong> CMS ownership and state license data carry no NPI; those correlations are labeled &ldquo;verify manually,&rdquo; and collision-prone matches are suppressed — never asserted.</li>
+          <li><strong>It produces leads, not verdicts.</strong> Every escalation requires a human. Precision is reported honestly and improves as reviewers adjudicate.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- PILOT -->
+    <section class="band pilot" id="pilot" aria-labelledby="pilot-h">
+      <div class="measure reveal">
+        <p class="section-tag">Get involved</p>
+        <h2 id="pilot-h">Evaluate it, implement the standard, or run a pilot.</h2>
+        <p>
+          The project is open source and the spec is open to implement. Integrity units
+          rebuilding their tooling can evaluate it on public data, leads-only, with no
+          procurement. Contributions and independent SEP implementations are welcome.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-seal" href="https://github.com/aion-context/aion-medsafe">Start on GitHub</a>
+          <a class="btn btn-quiet" href="https://github.com/aion-context/aion-medsafe/blob/main/docs/med-quest-mfcu-brief.md">Read the pilot brief</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <div class="foot-grid">
+      <div>
+        <span class="seal-mark" aria-hidden="true"></span>
+        <p class="foot-word">AION-MEDSAFE</p>
+        <p class="foot-note">Verifiable evidence for Medicaid provider integrity.</p>
+      </div>
+      <nav aria-label="Footer">
+        <a href="https://github.com/aion-context/aion-medsafe">GitHub</a>
+        <a href="https://github.com/aion-context/aion-medsafe/blob/main/docs/spec/sealed-evidence-packet.md">SEP spec</a>
+        <a href="https://github.com/aion-context/aion-medsafe/blob/main/docs/med-quest-mfcu-tech-appendix.md">Security &amp; architecture</a>
+        <a href="https://github.com/aion-context/aion-medsafe/blob/main/CHANGELOG.md">Changelog</a>
+      </nav>
+    </div>
+    <p class="disclaimer">
+      Independent open-source prototype. Not affiliated with, endorsed by, or operated
+      on behalf of any government agency. Uses public data only; holds no claims or
+      protected health information. Outputs are investigative leads for human review —
+      not findings or accusations. Dual-licensed MIT OR Apache-2.0.
+    </p>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

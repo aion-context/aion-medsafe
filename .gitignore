@@ -50,3 +50,6 @@ Thumbs.db
 # Virtual environments
 .venv/
 venv/
+
+# Playwright MCP scratch output
+.playwright-mcp/
