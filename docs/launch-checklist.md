@@ -18,30 +18,32 @@ outreach steps, or **(repo)** for in-tree work.
 - [x] Git history reviewed — no keys, data, PHI, or secrets in any commit
 - [x] Strategy & pilot docs reviewed and prepared for public release
 
-## Phase 1 — Final pre-public touches
+## Phase 1 — Final pre-public touches ✓
 
-- [ ] **(repo)** Affiliation/disclaimer in the README: independent prototype, **not
-      affiliated with or endorsed by** any government agency; **public data only**;
-      outputs are investigative leads, not findings.
-- [ ] **(repo)** Mark any illustrative pilot figures (success criteria, timelines)
-      clearly as examples.
-- [ ] **(repo)** Set version `0.1.0` in `system/Cargo.toml`; add `CHANGELOG.md`.
-- [ ] **(maintainer)** Re-run `make audit`; confirm CI green on the publish commit.
+- [x] **(repo)** Affiliation/disclaimer in the README + site footer: independent
+      prototype, **not affiliated with or endorsed by** any government agency;
+      **public data only**; outputs are investigative leads, not findings.
+- [x] **(repo)** Illustrative pilot figures marked as examples.
+- [x] **(repo)** Version `0.1.0` (both crates) + `CHANGELOG.md`.
+- [x] **(maintainer)** `make audit` PASS; CI green.
 
-## Phase 2 — Go public
+## Phase 2 — Go public ✓
 
-- [ ] **(maintainer)** GitHub → Settings → change visibility to **Public**.
-- [ ] **(maintainer)** Set repo description + topics (`medicaid`, `fraud`,
-      `program-integrity`, `provenance`, `rust`, `chain-of-custody`).
-- [ ] **(maintainer)** Confirm the CI badge renders publicly.
+- [x] **(maintainer)** Repo visibility set to **Public**.
+- [x] **(maintainer)** Description + homepage + 20 discovery topics set; SEO meta,
+      JSON-LD, robots.txt, sitemap, and a PNG OG card shipped.
+- [x] **(maintainer)** Pages live at https://aion-context.github.io/aion-medsafe/
+      (Actions deploy), CI badge renders publicly.
 
-## Phase 3 — Post-public hardening
+## Phase 3 — Post-public hardening ✓
 
-- [ ] **(maintainer)** Enable **secret scanning** + push protection.
-- [ ] **(maintainer)** Enable **Dependabot** alerts + security updates.
-- [ ] **(maintainer)** **Branch protection** on `main`: require CI + PRs.
-- [ ] **(maintainer)** Enable GitHub **private vulnerability reporting**
-      (complements `SECURITY.md`).
+- [x] **(maintainer)** Secret scanning + push protection enabled.
+- [x] **(maintainer)** Dependabot alerts + security updates enabled.
+- [x] **(maintainer)** Branch protection on `main`: CI required (strict),
+      linear history, force-push + deletion blocked; admin bypass kept for the
+      solo maintainer (external changes still go through PR + CI).
+- [x] **(maintainer)** Private vulnerability reporting enabled (complements
+      `SECURITY.md`).
 
 ## Phase 4 — Release `v0.1.0`
 
