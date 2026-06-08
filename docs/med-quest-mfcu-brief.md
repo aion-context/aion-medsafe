@@ -3,7 +3,7 @@
 **For:** Hawaii Med-QUEST Program Integrity & the Medicaid Fraud Control Unit (MFCU)
 **Re:** A provenance-first evidence and lead-ranking system for provider integrity
 **Status:** Working prototype on real national data — pilot-ready
-**Draft — internal**
+**Example proposal — figures illustrative**
 
 ---
 

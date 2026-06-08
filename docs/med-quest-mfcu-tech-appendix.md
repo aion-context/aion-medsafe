@@ -4,7 +4,7 @@
 **Companion to:** the positioning brief and one-pager
 **Status:** describes the current working prototype. Where something is *designed
 but not yet built*, it says so explicitly.
-**Draft — internal**
+**Example technical appendix — figures illustrative**
 
 ---
 
@@ -194,4 +194,4 @@ Provenance is therefore **third-party checkable**, not self-asserted.
 
 *All claims reflect the current working system over current public data. Source
 repository, `Cargo.lock`, CI configuration, and the audit script are available for
-your review. — Draft, internal*
+your review.*

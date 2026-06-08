@@ -7,6 +7,13 @@ an evidence-ranking and compliance-assistance system with cryptographic
 provenance via `aion-context`. It helps investigators find fraud patterns
 faster without replacing human judgment; it never accuses autonomously.
 
+> **Disclaimer.** AION-MEDSAFE is an independent open-source prototype. It is
+> **not affiliated with, endorsed by, or operated on behalf of** any government
+> agency. It uses **only public data**, holds no claims or protected health
+> information, and its outputs are **investigative leads for human review — not
+> findings or accusations**. Agency names appear only to describe public data
+> sources and context.
+
 - `pipeline/` — Python ingestion, normalization, and entity resolution ([details](pipeline/README.md))
 - `system/` — Rust provenance, trust graph, and policy-gated signals
 - `docs/` — [documentation index](docs/README.md), incl. the open

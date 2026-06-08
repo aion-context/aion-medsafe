@@ -53,4 +53,4 @@ correlations (ownership, licensing) are labeled "verify manually," not asserted.
 analyst time-to-packet · legal sign-off that a packet is hearing-grade.
 
 *Working prototype, running on current public data. Full brief and technical
-detail on request. — Draft, internal*
+detail on request. Example proposal; figures illustrative.*
